@@ -8,3 +8,13 @@ class User:
         self.position = 0
         self.orders = []
         self.trades = []
+
+    def getData(self):
+        return {
+            'username': self.username,
+            'user_id': self.user_id,
+            'cash': self.cash,
+            'position': self.position,
+            'orders': self.orders,
+            'trades': self.trades
+        }

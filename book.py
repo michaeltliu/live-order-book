@@ -4,6 +4,7 @@ from flask import Flask, request
 from flask_cors import CORS
 from user import User
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -96,14 +97,20 @@ def delete_order():
 
     return "No matching order number"
 
-@app.route('/create-user')
-def create_user():
+@app.route('/login')
+def handle_login():
     username = request.args.get('username')
     print(username)
-
-    new_user = User(username)
-    users[new_user.user_id] = new_user
-    return new_user.user_id
+    
+    user = None
+    for u in users.values():
+        if username == u.username:
+            user = u
+    if user == None:
+        user = User(username)
+        users[user.user_id] = user
+    
+    return user.getData()
 
 @app.route('/price-history')
 def get_price_history():
@@ -119,9 +126,7 @@ def get_price_history():
             sell_t.append(trade.trade_time)
             sell_p.append(trade.price)
     
-    plt.scatter(buy_t, buy_p, color = 'green')
-    plt.scatter(sell_t, sell_p, color = 'red')
-    plt.show()
+    return [datetime.now()]
 
 
 if __name__ == '__main__':
