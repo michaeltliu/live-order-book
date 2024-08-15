@@ -8,6 +8,7 @@ class Bid:
         self.quantity = quantity
         self.order_id = util.random_id()
         self.user_id = user_id
+        self.side = 'BUY'
 
     def __repr__(self):
         return f'Bid {self.quantity} @ LMT {self.limit} by {self.user_id}'
@@ -25,6 +26,7 @@ class Ask:
         self.quantity = quantity
         self.order_id = util.random_id()
         self.user_id = user_id
+        self.side = 'SELL'
 
     def __repr__(self):
         return f'Ask {self.quantity} @ LMT {self.limit} by {self.user_id}'

@@ -7,6 +7,20 @@
   pointer-events: none;
 }
 
+.column {
+  float: left;
+  width: 33.33%;
+  background-color: #263146;
+  color: white;
+}
+
+/* Clear floats after the columns */
+.row:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .App-logo {
     animation: App-logo-spin infinite 20s linear;

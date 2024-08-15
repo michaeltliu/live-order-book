@@ -26,12 +26,11 @@ def settle_trade(volume, price, buyer, seller, buy_aggr):
     buyer.position += volume
     seller.position -= volume
 
-@app.route('/buy')
-def buy():
-    limit = float(request.args.get('limit'))
-    quantity = int(request.args.get('quantity'))
-    user_id = request.args.get('user_id')
-    
+@app.route('/buy/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
+def buy(limit, quantity, user_id):
+    limit = float(limit)
+    quantity = int(quantity)
+
     bid = Bid(limit, quantity, user_id)
     buyer = users[user_id]
 
@@ -53,11 +52,10 @@ def buy():
 
     return "Success"
 
-@app.route('/sell')
-def sell():
-    limit = float(request.args.get('limit'))
-    quantity = int(request.args.get('quantity'))
-    user_id = request.args.get('user_id')
+@app.route('/sell/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
+def sell(limit, quantity, user_id):
+    limit = float(limit)
+    quantity = int(quantity)
 
     ask = Ask(limit, quantity, user_id)
     seller = users[user_id]
@@ -80,10 +78,8 @@ def sell():
 
     return "Success"
 
-@app.route('/delete')
-def delete_order():
-    order_id = request.args.get('order_id')
-
+@app.route('/delete-order/<order_id>')
+def delete_order(order_id):
     for bid in bids:
         if bid.order_id == order_id:
             bids.remove(bid)
@@ -97,9 +93,8 @@ def delete_order():
 
     return "No matching order number"
 
-@app.route('/login')
-def handle_login():
-    username = request.args.get('username')
+@app.route('/login/<username>')
+def handle_login(username):
     print(username)
     
     user = None
@@ -110,7 +105,14 @@ def handle_login():
         user = User(username)
         users[user.user_id] = user
     
-    return user.getData()
+    return user.user_id
+
+@app.route('/user-data/<user_id>')
+def get_user_data(user_id):
+    if user_id in users:
+        return users[user_id].getData()
+    else:
+        return "User not found"
 
 @app.route('/price-history')
 def get_price_history():
