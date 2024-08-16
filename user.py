@@ -15,6 +15,20 @@ class User:
             'user_id': self.user_id,
             'cash': self.cash,
             'position': self.position,
-            'orders': [{'order_id':order.order_id,'side':order.side,'limit':order.limit, 'quantity':order.quantity} for order in self.orders],
-            'trades': [{'price':trade.price, 'volume':trade.volume} for trade in self.trades]
+            'orders': [
+                {
+                    'order_id':order.order_id,
+                    'side':order.side,
+                    'limit':order.limit, 
+                    'quantity':order.quantity
+                } for order in self.orders
+            ],
+            'trades': [
+                {
+                    'buyer_name':trade.buyer_name, 
+                    'seller_name':trade.seller_name, 
+                    'price':trade.price, 
+                    'volume':trade.volume
+                } for trade in self.trades
+            ]
         }

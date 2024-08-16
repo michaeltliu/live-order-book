@@ -128,7 +128,7 @@ def get_price_history():
             sell_t.append(trade.trade_time)
             sell_p.append(trade.price)
     
-    return [datetime.now()]
+    return {'buy_t':buy_t, 'buy_p':buy_p, 'sell_t':sell_t, 'sell_p':sell_p}
 
 
 if __name__ == '__main__':

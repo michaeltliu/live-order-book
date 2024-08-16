@@ -1,14 +1,20 @@
 import logo from './logo.svg';
 import './App.css';
-import {useState} from 'react'
+import {useState, useEffect} from 'react'
+import Plot from 'react-plotly.js'
 
-/*setUserData not actually changing userData*/
 async function requestUserData(user_id, setUserData) {
   const response = await fetch(`http://127.0.0.1:5000/user-data/${user_id}`);
   const data = await response.json();
   console.log(data)
   setUserData(data);
   console.log('done');
+}
+
+async function requestPriceHistory(setPriceData) {
+  const response = await fetch("http://127.0.0.1:5000/price-history");
+  const data = await response.json();
+  setPriceData(data);
 }
 
 function LoginForm({setIsLoggedIn, setUserData}) {
@@ -94,8 +100,15 @@ function SellForm({user_id, setUserData}) {
   )
 }
 
-function LoggedInView({setUserData, userData, setIsLoggedIn}) {
-  
+function UserDataPanel({setUserData, userData, setIsLoggedIn}) {
+  useEffect(() => {
+    const interval = setInterval(() => {
+      requestUserData(userData.user_id, setUserData);
+    }, 4000);
+
+    return () => clearInterval(interval)
+  }, [userData.user_id]);
+
   function handleLogout() {
     setUserData('');
     setIsLoggedIn(false);
@@ -108,12 +121,11 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
   );
 
   const tradeList = userData.trades.map(trade => 
-    <p>{trade.buyer_name} {trade.seller_name}</p>
+    <p>{trade.buyer_name} {trade.seller_name} {trade.volume} LOTS @ {trade.price}</p>
   );
 
   return (
-    <div className="row">
-      <div className="column">
+    <div className="column">
         <p>Username: {userData.username}</p>
         <p>User ID: {userData.user_id}</p>
         <p>Cash: {userData.cash}</p>
@@ -122,13 +134,71 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
         Trades: <ul>{tradeList}</ul>
         <button onClick={handleLogout}>Logout</button>
       </div>
+  )
+
+}
+
+function PriceHistory() {
+  const [priceData, setPriceData] = useState({buy_p:[], buy_t:[], sell_p:[], sell_t:[]});
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      requestPriceHistory(setPriceData);
+    }, 4000);
+
+    return () => clearInterval(interval)
+  }, []);
+
+  return (
+    <Plot 
+      data={[
+        {
+          x: priceData.buy_t.map((d) => new Date(d)),
+          y: priceData.buy_p,
+          type: 'scatter',
+          mode: 'markers',
+          marker: {color: 'green'},
+          name: 'Buy aggressor'
+        },
+        {
+          x: priceData.sell_t.map((d) => new Date(d)),
+          y: priceData.sell_p,
+          type: 'scatter',
+          mode: 'markers',
+          marker: {color: 'red'},
+          name: 'Sell aggressor'
+        }
+      ]}
+      layout={{
+        title: 'Price History',
+        xaxis: {
+          title: 'Time'
+        },
+        yaxis: {
+          title: 'Price'
+        }
+      }}
+    />
+  )
+}
+
+function LoggedInView({setUserData, userData, setIsLoggedIn}) {
+
+  return (
+    <>
+    <div className="row">
+      <UserDataPanel setUserData={setUserData} userData={userData} setIsLoggedIn={setIsLoggedIn}/>
       <div className="column">
         <BuyForm user_id={userData.user_id} setUserData={setUserData}/>
+        <br></br>
+        <SellForm user_id={userData.user_id} setUserData={setUserData}/>
+        <br></br>
+        <PriceHistory />
       </div>
       <div className="column">
-        <SellForm user_id={userData.user_id} setUserData={setUserData}/>
       </div>
     </div>
+    </>
   )
 }
 
