@@ -7,6 +7,12 @@
   pointer-events: none;
 }
 
+table, th {
+  border: 1px solid black;
+  margin: auto;
+  overflow: scroll;
+}
+
 .column {
   float: left;
   width: 33.33%;

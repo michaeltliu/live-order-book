@@ -21,14 +21,12 @@ class User:
                     'side':order.side,
                     'limit':order.limit, 
                     'quantity':order.quantity
-                } for order in self.orders
-            ],
+                } for order in self.orders],
             'trades': [
                 {
                     'buyer_name':trade.buyer_name, 
                     'seller_name':trade.seller_name, 
                     'price':trade.price, 
                     'volume':trade.volume
-                } for trade in self.trades
-            ]
+                } for trade in self.trades]
         }
