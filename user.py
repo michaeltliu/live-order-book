@@ -8,6 +8,7 @@ class User:
         self.position = 0
         self.orders = []
         self.trades = []
+        self.sid = set() # Maintains all active sessions
 
     def getData(self):
         return {
@@ -18,15 +19,17 @@ class User:
             'orders': [
                 {
                     'order_id':order.order_id,
+                    'order_sent':util.strtime(order.order_time),
                     'side':order.side,
                     'limit':order.limit, 
                     'quantity':order.quantity
                 } for order in self.orders],
             'trades': [
                 {
+                    'trade_time':util.strtime(trade.trade_time),
                     'buyer_name':trade.buyer_name, 
                     'seller_name':trade.seller_name, 
                     'price':trade.price, 
                     'volume':trade.volume
                 } for trade in self.trades]
-        }
+            }

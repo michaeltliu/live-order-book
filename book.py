@@ -2,14 +2,18 @@ import heapq
 from order import Bid, Ask, Trade
 from flask import Flask, request
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from user import User
 from datetime import datetime
 import util
 
 app = Flask(__name__)
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 users = {}
+sessions = {}
+
 bids = []
 asks = []
 trades = []
@@ -26,16 +30,25 @@ best_offer_p = []
 
 bt, bp, ot, op = [], [], [], []
 
+lb_broadcast_i = 0
+ls_broadcast_i = 0
+bbo_broadcast_i = 0
+
+def emit_set(event, data, sid_set):
+    for sid in sid_set:
+        socketio.emit(event, data, to=sid)
+
+# Updates buyer and seller's data and logs last done
 def settle_trade(volume, price, buyer, seller, buy_aggr):
     trade = Trade(volume, price, buyer.username, seller.username, buy_aggr)
     buyer.trades.append(trade)
     seller.trades.append(trade)
     trades.append(trade)
     if trade.buy_aggr:
-        last_buy_t.append(trade.trade_time)
+        last_buy_t.append(util.strtime(trade.trade_time))
         last_buy_p.append(trade.price)
     else:
-        last_sell_t.append(trade.trade_time)
+        last_sell_t.append(util.strtime(trade.trade_time))
         last_sell_p.append(trade.price)
 
     notional = volume * price
@@ -45,10 +58,12 @@ def settle_trade(volume, price, buyer, seller, buy_aggr):
     seller.position -= volume
 
 def track_bbo(time):
+    time = util.strtime(time)
     bbid = 0 if len(bids) == 0 else bids[0].limit
     boffer = 100 if len(asks) == 0 else asks[0].limit
     
     if len(best_bid_p) == 0:
+        # BBO is empty so add first point to plot
         best_bid_t.append(time)
         best_bid_p.append(bbid)
         best_offer_t.append(time)
@@ -59,9 +74,13 @@ def track_bbo(time):
         ot.append(time)
         op.append(boffer)
 
+        return True
+
     elif best_bid_p[-1] == bbid and best_offer_p[-1] == boffer:
-        return
+        # BBO is unchanged
+        return False
     else:
+        # BBO is nonempty so add point and draw line
         bt.extend([time, time])
         bp.extend([best_bid_p[-1], bbid])
         ot.extend([time, time])
@@ -72,15 +91,40 @@ def track_bbo(time):
         best_offer_t.append(time)
         best_offer_p.append(boffer)
 
+        return True
+
+@socketio.on('connect')
+def handle_connect(auth):
+    user_id = auth['user_id']
+    user = users[user_id]
+    user.sid.add(request.sid)
+    sessions[request.sid] = user.user_id
+
+    emit('update_bbo_history', get_bbo_history(0))
+    emit('update_ld_history', get_last_dones(0,0))
+
+    print('Client connected')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
 @app.route('/buy/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
 def buy(limit, quantity, user_id):
+    global bbo_broadcast_i
+    global lb_broadcast_i
+    global ls_broadcast_i
+
     limit = round(float(limit), 2)
     quantity = int(quantity)
 
     bid = Bid(limit, quantity, user_id)
     buyer = users[user_id]
 
+    traded = False
+
     while len(asks) > 0 and asks[0].limit <= limit and quantity > 0:
+        traded = True
         seller = users[asks[0].user_id]
         volume = min(asks[0].quantity, quantity)
         settle_trade(volume, asks[0].limit, buyer, seller, True)
@@ -91,24 +135,44 @@ def buy(limit, quantity, user_id):
             seller.orders.remove(asks[0])
             heapq.heappop(asks)
 
+        emit_set('update_user_data', seller.getData(), seller.sid)
+        emit_set('update_user_data', buyer.getData(), buyer.sid)
+
+        # TODO: Associate a user's trade with its order
+
     if quantity > 0:
         bid.quantity = quantity
         heapq.heappush(bids, bid)
         buyer.orders.append(bid)
+        emit_set('update_user_data', buyer.getData(), buyer.sid)
 
-    track_bbo(datetime.now())
+    if track_bbo(datetime.now()):
+        socketio.emit('update_bbo_history', get_bbo_history(bbo_broadcast_i))
+        bbo_broadcast_i = len(best_bid_p)
+
+    if traded:
+        socketio.emit('update_ld_history', get_last_dones(lb_broadcast_i, ls_broadcast_i))
+        lb_broadcast_i = len(last_buy_p)
+        ls_broadcast_i = len(last_sell_p)
 
     return "Success"
 
 @app.route('/sell/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
 def sell(limit, quantity, user_id):
+    global bbo_broadcast_i
+    global lb_broadcast_i
+    global ls_broadcast_i
+
     limit = float(limit)
     quantity = int(quantity)
 
     ask = Ask(limit, quantity, user_id)
     seller = users[user_id]
 
+    traded = False
+
     while len(bids) > 0 and bids[0].limit >= limit and quantity > 0:
+        traded = True
         buyer = users[bids[0].user_id]
         volume = min(bids[0].quantity, quantity)
         settle_trade(volume, bids[0].limit, buyer, seller, False)
@@ -119,39 +183,57 @@ def sell(limit, quantity, user_id):
             buyer.orders.remove(bids[0])
             heapq.heappop(bids)
 
+        emit_set('update_user_data', buyer.getData(), buyer.sid)
+        emit_set('update_user_data', seller.getData(), seller.sid)
+
+        # TODO: Associate a user's trade with its order
+
     if quantity > 0:
         ask.quantity = quantity
         heapq.heappush(asks, ask)
         seller.orders.append(ask)
+        emit_set('update_user_data', seller.getData(), seller.sid)
 
-    track_bbo(datetime.now())
+    if track_bbo(datetime.now()):
+        socketio.emit('update_bbo_history', get_bbo_history(bbo_broadcast_i))
+        bbo_broadcast_i = len(best_bid_p)
+    if traded:
+        socketio.emit('update_ld_history', get_last_dones(lb_broadcast_i, ls_broadcast_i))
+        lb_broadcast_i = len(last_buy_p)
+        ls_broadcast_i = len(last_sell_p)
 
     return "Success"
 
 @app.route('/delete-order/<order_id>')
 def delete_order(order_id):
+    global bbo_broadcast_i
+
     for bid in bids:
         if bid.order_id == order_id:
             bids.remove(bid)
             users[bid.user_id].orders.remove(bid)
+            emit_set('update_user_data', users[bid.user_id].getData(), users[bid.user_id].sid)
 
-            track_bbo(datetime.now())
+            if track_bbo(datetime.now()):
+                socketio.emit('update_bbo_history', get_bbo_history(bbo_broadcast_i))
+                bbo_broadcast_i = len(best_bid_p)
             return "Success"
             
     for ask in asks:
         if ask.order_id == order_id:
             asks.remove(ask)
             users[ask.user_id].orders.remove(ask)
+            emit_set('update_user_data', users[ask.user_id].getData(), users[ask.user_id].sid)
 
-            track_bbo(datetime.now())
+            if track_bbo(datetime.now()):
+                socketio.emit('update_bbo_history', get_bbo_history(bbo_broadcast_i))
+                bbo_broadcast_i = len(best_bid_p)
             return "Success"
 
-    return "Order number not found"
+    return "Order number not found" # These return statements are never used
     
 @app.route('/login/<username>')
-def handle_login(username):
-    print(username)
-    
+def handle_login(username):    
     user = None
     for u in users.values():
         if username == u.username:
@@ -159,7 +241,7 @@ def handle_login(username):
     if user == None:
         user = User(username)
         users[user.user_id] = user
-    
+
     return user.user_id
 
 @app.route('/user-data/<user_id>')
@@ -199,4 +281,4 @@ def get_last_dones(b_i, s_i):
 
 
 if __name__ == '__main__':
-    app.run(port=5000)
+    socketio.run(app, port=5000)

@@ -1,6 +1,7 @@
 import './App.css';
 import {useState, useEffect} from 'react'
 import Plot from 'react-plotly.js'
+import { io } from 'socket.io-client';
 
 async function requestOrderBook(setOrderData) {
   const response = await fetch("http://127.0.0.1:5000/order-book");
@@ -11,6 +12,7 @@ async function requestOrderBook(setOrderData) {
 async function requestUserData(user_id, setUserData) {
   const response = await fetch(`http://127.0.0.1:5000/user-data/${user_id}`);
   const data = await response.json();
+  console.log("request user data", data);
   setUserData(data);
 }
 
@@ -24,7 +26,7 @@ function LoginForm({setIsLoggedIn, setUserData}) {
       const response = await fetch(`http://127.0.0.1:5000/login/${input}`);
       const user_id = await response.text();
       console.log(user_id)
-      await requestUserData(user_id, setUserData);
+      await requestUserData(user_id, setUserData); // this can be consolidated by emitting in handle_connect on server side
       setIsLoggedIn(true);
     }
   }
@@ -51,7 +53,7 @@ function BuyForm({user_id, setUserData}) {
       const response = await fetch(`http://127.0.0.1:5000/buy/limit/${limitInput}/quantity/${quantityInput}/user_id/${user_id}`);
       const data = await response.text();
       setMessage(data);
-      await requestUserData(user_id, setUserData)
+      //await requestUserData(user_id, setUserData)
     }
   }
 
@@ -102,9 +104,10 @@ function UserDataPanel({setUserData, userData, setIsLoggedIn}) {
 
   async function handleDeleteOrder(order_id) {
     await fetch(`http://127.0.0.1:5000/delete-order/${order_id}`);
-    await requestUserData(userData.user_id, setUserData);
+    //await requestUserData(userData.user_id, setUserData);
   }
   
+  /*
   useEffect(() => {
     const interval = setInterval(() => {
       requestUserData(userData.user_id, setUserData);
@@ -112,6 +115,7 @@ function UserDataPanel({setUserData, userData, setIsLoggedIn}) {
 
     return () => clearInterval(interval)
   }, [userData.user_id]);
+  */
 
   function handleLogout() {
     setUserData('');
@@ -145,6 +149,7 @@ function UserDataPanel({setUserData, userData, setIsLoggedIn}) {
 function OrderBook() {
   const [orderData, setOrderData] = useState({'bids':[], 'asks':[]});
 
+  /*
   useEffect(() => {
     const interval = setInterval(() => {
       requestOrderBook(setOrderData);
@@ -152,6 +157,7 @@ function OrderBook() {
 
     return () => clearInterval(interval)
   }, []);
+  */
 
 
   return (
@@ -172,17 +178,9 @@ function OrderBook() {
   )
 }
 
-function PriceHistory() {
-  const [bboHistory, setBBOHistory] = useState(
-    {
-      bb_t:[], bb_p:[], bo_t:[], bo_p:[], /* Actual data points */
-      bt:[], bp:[], ot:[], op:[], /* Contains extra points to aid graphing */
-    });
-
-  const [lastDones, setLastDones] = useState(
-    {buy_t:[], buy_p:[], sell_t:[], sell_p:[]}
-  );
-
+function PriceHistory({bboHistory, lastDones}) {
+  
+  /*
   async function requestBBOHistory(index) {
     const response = await fetch(`http://127.0.0.1:5000/bbo-history/${index}`);
     const data = await response.json();
@@ -220,6 +218,7 @@ function PriceHistory() {
 
     return () => clearInterval(interval)
   }, [bboHistory, lastDones]);
+  */
 
   return (
     <Plot 
@@ -246,7 +245,7 @@ function PriceHistory() {
           type: 'scatter',
           mode: 'markers',
           marker: {color: 'purple'},
-          name: 'BBO'
+          name: 'Best bid'
         },
         {
           x: bboHistory.bo_t.map((d) => new Date(d)),
@@ -254,7 +253,7 @@ function PriceHistory() {
           type: 'scatter',
           mode: 'markers',
           marker: {color: 'purple'},
-          showlegend: false
+          name: 'Best offer'
         },
         {
           x: bboHistory.bt.map((d) => new Date(d)),
@@ -290,6 +289,54 @@ function PriceHistory() {
 }
 
 function LoggedInView({setUserData, userData, setIsLoggedIn}) {
+  const [bboHistory, setBBOHistory] = useState(
+    {
+      bb_t:[], bb_p:[], bo_t:[], bo_p:[], /* Actual data points */
+      bt:[], bp:[], ot:[], op:[], /* Contains extra points to aid graphing */
+    });
+
+  const [lastDones, setLastDones] = useState(
+    {buy_t:[], buy_p:[], sell_t:[], sell_p:[]}
+  );
+
+  useEffect(() => {
+    const socket = io('http://127.0.0.1:5000/', {
+      auth: {"user_id":userData.user_id}
+    });
+
+    socket.on('update_user_data', (data) => {
+      console.log("update from socket",data);
+      setUserData(data);
+    })
+
+    socket.on('update_bbo_history', (data) => {
+      setBBOHistory(prev => {
+        return {
+          bb_t: prev.bb_t.concat(data.bb_t),
+          bb_p: prev.bb_p.concat(data.bb_p),
+          bo_t: prev.bo_t.concat(data.bo_t),
+          bo_p: prev.bo_p.concat(data.bo_p),
+          bt: prev.bt.concat(data.bt),
+          bp: prev.bp.concat(data.bp),
+          ot: prev.ot.concat(data.ot),
+          op: prev.op.concat(data.op),
+        };
+      });
+    })
+
+    socket.on('update_ld_history', (data) => {
+      setLastDones(prev => ({
+        buy_t:[...prev.buy_t, ...data.buy_t],
+        buy_p:[...prev.buy_p, ...data.buy_p],
+        sell_t:[...prev.sell_t, ...data.sell_t],
+        sell_p:[...prev.sell_p, ...data.sell_p]
+      }));
+    })
+
+    return () => {
+      socket.disconnect();
+    }
+  }, []);
 
   return (
     <>
@@ -302,7 +349,7 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
         <br></br>
         <SellForm user_id={userData.user_id} setUserData={setUserData}/>
         <br></br>
-        <PriceHistory />
+        <PriceHistory bboHistory={bboHistory} lastDones={lastDones}/>
       </div>
       <div className="column">
       </div>
