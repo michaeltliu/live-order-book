@@ -1,14 +1,14 @@
 import util
 
 class User:
-    def __init__(self, username):
+    def __init__(self, username, user_id):
         self.username = username
-        self.user_id = util.random_id()
+        self.user_id = user_id
         self.cash = 0
         self.position = 0
         self.orders = []
         self.trades = []
-        self.sid = set() # Maintains all active sessions
+        self.sid = set() # Maintains all active sessions for this user in this room
 
     def getData(self):
         return {
@@ -31,5 +31,6 @@ class User:
                     'seller_name':trade.seller_name, 
                     'price':trade.price, 
                     'volume':trade.volume
-                } for trade in self.trades]
+                } for trade in self.trades],
+            'sid': list(self.sid)
             }

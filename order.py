@@ -3,8 +3,8 @@ from datetime import datetime
 
 class Bid:
     def __init__(self, limit, quantity, user_id):
-        self.limit = limit
         self.order_time = datetime.now()
+        self.limit = limit
         self.quantity = quantity
         self.order_id = util.random_id()
         self.user_id = user_id
@@ -21,8 +21,8 @@ class Bid:
 
 class Ask:
     def __init__(self, limit, quantity, user_id):
-        self.limit = limit
         self.order_time = datetime.now()
+        self.limit = limit
         self.quantity = quantity
         self.order_id = util.random_id()
         self.user_id = user_id

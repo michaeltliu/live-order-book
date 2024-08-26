@@ -3,17 +3,17 @@ import {useState, useEffect} from 'react'
 import Plot from 'react-plotly.js'
 import { io } from 'socket.io-client';
 
+
 async function requestOrderBook(setOrderData) {
   const response = await fetch("http://127.0.0.1:5000/order-book");
   const data = await response.json();
   setOrderData(data);
 }
 
-async function requestUserData(user_id, setUserData) {
-  const response = await fetch(`http://127.0.0.1:5000/user-data/${user_id}`);
+async function requestRoomUserData(room_id, user_id, setRoomUserData) {
+  const response = await fetch(`http://127.0.0.1:5000/user-data/${room_id}/${user_id}`);
   const data = await response.json();
-  console.log("request user data", data);
-  setUserData(data);
+  setRoomUserData(data);
 }
 
 function LoginForm({setIsLoggedIn, setUserData}) {
@@ -24,10 +24,10 @@ function LoginForm({setIsLoggedIn, setUserData}) {
     if (input.trim() !== "") {
       
       const response = await fetch(`http://127.0.0.1:5000/login/${input}`);
-      const user_id = await response.text();
-      console.log(user_id)
-      await requestUserData(user_id, setUserData); // this can be consolidated by emitting in handle_connect on server side
+      const data = await response.json();
+      setUserData(data);
       setIsLoggedIn(true);
+      console.log(data);
     }
   }
 
@@ -42,7 +42,7 @@ function LoginForm({setIsLoggedIn, setUserData}) {
   )
 }
 
-function BuyForm({user_id, setUserData}) {
+function BuyForm({socket}) {
   const [limitInput, setLimitInput] = useState('');
   const [quantityInput, setQuantityInput] = useState('');
   const [message, setMessage] = useState('');
@@ -50,10 +50,9 @@ function BuyForm({user_id, setUserData}) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (limitInput.trim() !== "" && quantityInput.trim() !== "") {
-      const response = await fetch(`http://127.0.0.1:5000/buy/limit/${limitInput}/quantity/${quantityInput}/user_id/${user_id}`);
-      const data = await response.text();
-      setMessage(data);
-      //await requestUserData(user_id, setUserData)
+      socket.emit('buy', limitInput, quantityInput, response => {
+        setMessage(response);
+      })
     }
   }
 
@@ -71,7 +70,7 @@ function BuyForm({user_id, setUserData}) {
   )
 }
 
-function SellForm({user_id, setUserData}) {
+function SellForm({socket}) {
   const [limitInput, setLimitInput] = useState('');
   const [quantityInput, setQuantityInput] = useState('');
   const [message, setMessage] = useState('');
@@ -79,10 +78,9 @@ function SellForm({user_id, setUserData}) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (limitInput.trim() !== "" && quantityInput.trim() !== "") {
-      const response = await fetch(`http://127.0.0.1:5000/sell/limit/${limitInput}/quantity/${quantityInput}/user_id/${user_id}`);
-      const data = await response.text();
-      setMessage(data);
-      await requestUserData(user_id, setUserData);
+      socket.emit('sell', limitInput, quantityInput, response => {
+        setMessage(response);
+      })
     }
   }
 
@@ -100,64 +98,43 @@ function SellForm({user_id, setUserData}) {
   )
 }
 
-function UserDataPanel({setUserData, userData, setIsLoggedIn}) {
+function UserDataPanel({socket, roomUserData, setRoomId}) {
 
-  async function handleDeleteOrder(order_id) {
-    await fetch(`http://127.0.0.1:5000/delete-order/${order_id}`);
-    //await requestUserData(userData.user_id, setUserData);
-  }
-  
-  /*
-  useEffect(() => {
-    const interval = setInterval(() => {
-      requestUserData(userData.user_id, setUserData);
-    }, 4000);
-
-    return () => clearInterval(interval)
-  }, [userData.user_id]);
-  */
-
-  function handleLogout() {
-    setUserData('');
-    setIsLoggedIn(false);
+  function handleDeleteOrder(order_id) {
+    socket.emit('delete', order_id);
   }
 
-  const orderList = userData.orders.map(order => 
+  function handleExit() {
+    socket.emit('exit-room');
+    setRoomId('');
+  }
+
+  const orderList = roomUserData.orders.map(order => 
     <p>
       {order.order_id}: {order.side} {order.quantity} @ {order.limit} 
       <button onClick={() => handleDeleteOrder(order.order_id)}>Delete Order</button>
     </p>
   );
 
-  const tradeList = userData.trades.map(trade => 
+  const tradeList = roomUserData.trades.map(trade => 
     <p>{trade.buyer_name} {trade.seller_name} {trade.volume} LOTS @ {trade.price}</p>
   );
 
   return (
     <>
-      <p>Username: {userData.username}</p>
-      <p>User ID: {userData.user_id}</p>
-      <p>Cash: {userData.cash}</p>
-      <p>Position: {userData.position}</p>
+      <p>Username: {roomUserData.username}</p>
+      <p>User ID: {roomUserData.user_id}</p>
+      <p>Cash: {roomUserData.cash}</p>
+      <p>Position: {roomUserData.position}</p>
       Orders: <ul>{orderList}</ul>
       Trades: <ul>{tradeList}</ul>
-      <button onClick={handleLogout}>Logout</button>
+      <button onClick={() => handleExit()}>Exit Room</button>
     </>
   )
 }
 
 function OrderBook() {
   const [orderData, setOrderData] = useState({'bids':[], 'asks':[]});
-
-  /*
-  useEffect(() => {
-    const interval = setInterval(() => {
-      requestOrderBook(setOrderData);
-    }, 2000);
-
-    return () => clearInterval(interval)
-  }, []);
-  */
 
 
   return (
@@ -180,46 +157,6 @@ function OrderBook() {
 
 function PriceHistory({bboHistory, lastDones}) {
   
-  /*
-  async function requestBBOHistory(index) {
-    const response = await fetch(`http://127.0.0.1:5000/bbo-history/${index}`);
-    const data = await response.json();
-
-    setBBOHistory(prev => {
-      return {
-        bb_t: prev.bb_t.concat(data.bb_t),
-        bb_p: prev.bb_p.concat(data.bb_p),
-        bo_t: prev.bo_t.concat(data.bo_t),
-        bo_p: prev.bo_p.concat(data.bo_p),
-        bt: prev.bt.concat(data.bt),
-        bp: prev.bp.concat(data.bp),
-        ot: prev.ot.concat(data.ot),
-        op: prev.op.concat(data.op),
-      };
-    });
-  }
-  
-  async function requestLastDones(b_i, s_i) {
-    const response = await fetch(`http://127.0.0.1:5000/last-dones/${b_i}/${s_i}`);
-    const data = await response.json();
-    setLastDones(prev => ({
-      buy_t:[...prev.buy_t, ...data.buy_t],
-      buy_p:[...prev.buy_p, ...data.buy_p],
-      sell_t:[...prev.sell_t, ...data.sell_t],
-      sell_p:[...prev.sell_p, ...data.sell_p]
-    }));
-  }  
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      requestBBOHistory(bboHistory.bb_p.length);
-      requestLastDones(lastDones.buy_p.length, lastDones.sell_p.length);
-    }, 6000);
-
-    return () => clearInterval(interval)
-  }, [bboHistory, lastDones]);
-  */
-
   return (
     <Plot 
       data={[
@@ -228,7 +165,7 @@ function PriceHistory({bboHistory, lastDones}) {
           y: lastDones.buy_p,
           type: 'scatter',
           mode: 'markers',
-          marker: {color: 'green'},
+          marker: {color: 'green', symbol: 'triangle-up', size: 9},
           name: 'Last done buy aggressor',
         },
         {
@@ -236,7 +173,7 @@ function PriceHistory({bboHistory, lastDones}) {
           y: lastDones.sell_p,
           type: 'scatter',
           mode: 'markers',
-          marker: {color: 'red'},
+          marker: {color: 'red', symbol: 'triangle-down', size: 9},
           name: 'Last done sell aggressor'
         },
         {
@@ -288,28 +225,32 @@ function PriceHistory({bboHistory, lastDones}) {
   )
 }
 
-function LoggedInView({setUserData, userData, setIsLoggedIn}) {
+function LoggedInView({setIsLoggedIn, setUserData, userData}) {
+  const [socket, setSocket] = useState(null);
+  const [roomId, setRoomId] = useState('');
+  const [roomUserData, setRoomUserData] = useState('');
   const [bboHistory, setBBOHistory] = useState(
     {
       bb_t:[], bb_p:[], bo_t:[], bo_p:[], /* Actual data points */
       bt:[], bp:[], ot:[], op:[], /* Contains extra points to aid graphing */
     });
-
   const [lastDones, setLastDones] = useState(
     {buy_t:[], buy_p:[], sell_t:[], sell_p:[]}
   );
 
   useEffect(() => {
-    const socket = io('http://127.0.0.1:5000/', {
-      auth: {"user_id":userData.user_id}
-    });
+    const socketio = io('http://127.0.0.1:5000/');
 
-    socket.on('update_user_data', (data) => {
-      console.log("update from socket",data);
+    socketio.on('update_user_data', (data) => {
       setUserData(data);
     })
 
-    socket.on('update_bbo_history', (data) => {
+    socketio.on('update_roomuser_data', (data) => {
+      console.log("update from socket", data);
+      setRoomUserData(data);
+    })
+
+    socketio.on('update_bbo_history', (data) => {
       setBBOHistory(prev => {
         return {
           bb_t: prev.bb_t.concat(data.bb_t),
@@ -324,7 +265,7 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
       });
     })
 
-    socket.on('update_ld_history', (data) => {
+    socketio.on('update_ld_history', (data) => {
       setLastDones(prev => ({
         buy_t:[...prev.buy_t, ...data.buy_t],
         buy_p:[...prev.buy_p, ...data.buy_p],
@@ -333,21 +274,116 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
       }));
     })
 
+    setSocket(socketio);
+
     return () => {
-      socket.disconnect();
+      socketio.off('update_user_data');
+      socketio.off('update_bbo_history');
+      socketio.off('update_ld_history');
+      socketio.disconnect();
     }
   }, []);
 
   return (
+    roomId ? (
+      <RoomView socket={socket} roomUserData={roomUserData} bboHistory={bboHistory} 
+      lastDones={lastDones} setRoomId={setRoomId}/>
+    ) : (
+      <SelectRoomView socket={socket} userData={userData} setIsLoggedIn={setIsLoggedIn} 
+      setRoomId={setRoomId} setRoomUserData={setRoomUserData} setBBOHistory={setBBOHistory} setLastDones={setLastDones}/>
+    )
+  )
+}
+
+function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUserData, setBBOHistory, setLastDones}) {
+  const [createRoomName, setCreateRoomName] = useState('');
+  const [joinRoomId, setJoinRoomId] = useState('');
+  const [yourRoomSelection, setYourRoomSelection] = useState('');
+
+  console.log('in selectroomview');
+  function yourRoomsSubmit() {
+
+  }
+
+  function joinRoomSubmit(e) {
+    e.preventDefault();
+    if (joinRoomId.trim() !== "") {
+      socket.emit('join-room', joinRoomId, userData.user_id, response => {
+        setRoomUserData(response.user_data)
+        setBBOHistory(response.bbo_history)
+        setLastDones(response.ld_history)
+        setRoomId(response.room_id)
+      });
+    }
+  }
+  
+  function createRoomSubmit(e) {
+    e.preventDefault();
+    if (createRoomName.trim() !== "") {
+      socket.emit('create-room', createRoomName, response => {
+        socket.emit('join-room', response, userData.user_id, response => {
+          setRoomUserData(response.user_data)
+          setRoomId(response.room_id)
+        });
+      });
+      /*
+      const response = await fetch(`http://127.0.0.1:5000/create-room/${createRoomName}`);
+      const room_id = await response.text();
+      await requestRoomUserData(room_id, userData.user_id, setRoomUserData);
+      setRoomId(room_id);*/
+    }
+  } 
+
+  const yourRoomsList = userData.rooms.map(room => 
+    <option value={room}>
+      {room}
+    </option>
+  )
+  return (
+    <div className="row">
+      <div className="column">
+        <h3>Create room</h3>
+        <form onSubmit={createRoomSubmit}>
+          <input type="text" value={createRoomName} 
+          placeholder="Room Name" onChange={(e)=>setCreateRoomName(e.target.value)} /> <br></br>
+          <button type="submit">Go!</button>
+        </form>
+      </div>
+      <div className="column">
+        <h3>Join room</h3>
+        <form onSubmit={joinRoomSubmit}>
+          <input type="text" value={joinRoomId} 
+          placeholder="Room ID" onChange={(e)=>setJoinRoomId(e.target.value)} /> <br></br>
+          <button type="submit">Go!</button>
+        </form>
+      </div>
+      <div className="column">
+        <h3>Your rooms</h3>
+        <button onClick={() => setIsLoggedIn(false)}>Logout</button>
+        <form onSubmit={yourRoomsSubmit}>
+          <label>Select a room:</label>
+          <select>
+            <option value=""></option>
+            {yourRoomsList}
+          </select>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function RoomView({socket, roomUserData, bboHistory, lastDones, setRoomId}) {
+  
+  return (
     <>
     <div className="row">
       <div className="column">
-        <UserDataPanel setUserData={setUserData} userData={userData} setIsLoggedIn={setIsLoggedIn}/>
+        <UserDataPanel socket={socket} roomUserData={roomUserData} setRoomId={setRoomId} />
       </div>
       <div className="column">
-        <BuyForm user_id={userData.user_id} setUserData={setUserData}/>
+        <BuyForm socket={socket} />
         <br></br>
-        <SellForm user_id={userData.user_id} setUserData={setUserData}/>
+        <SellForm socket={socket} />
         <br></br>
         <PriceHistory bboHistory={bboHistory} lastDones={lastDones}/>
       </div>
@@ -365,13 +401,13 @@ function LoggedInView({setUserData, userData, setIsLoggedIn}) {
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userData, setUserData] = useState('');
+  const [userData, setUserData] = useState(''); /* {user_id, rooms} */
 
   return (
     <div className="App">
       {
         isLoggedIn ? (
-          <LoggedInView setUserData={setUserData} userData={userData} setIsLoggedIn={setIsLoggedIn} />
+          <LoggedInView setIsLoggedIn={setIsLoggedIn} setUserData={setUserData} userData={userData}/>
         ) : (
           <LoginForm setIsLoggedIn={setIsLoggedIn} setUserData={setUserData}/>
         )

@@ -4,12 +4,16 @@ from flask import Flask, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from user import User
+from room import Room
+from roomuser import RoomUser
 from datetime import datetime
 import util
 
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+rooms = {}
 
 users = {}
 sessions = {}
@@ -34,12 +38,14 @@ lb_broadcast_i = 0
 ls_broadcast_i = 0
 bbo_broadcast_i = 0
 
+#DONE
 def emit_set(event, data, sid_set):
     for sid in sid_set:
         socketio.emit(event, data, to=sid)
 
+# DONE
 # Updates buyer and seller's data and logs last done
-def settle_trade(volume, price, buyer, seller, buy_aggr):
+def settle_trade(room, volume, price, buyer, seller, buy_aggr):
     trade = Trade(volume, price, buyer.username, seller.username, buy_aggr)
     buyer.trades.append(trade)
     seller.trades.append(trade)
@@ -57,7 +63,8 @@ def settle_trade(volume, price, buyer, seller, buy_aggr):
     buyer.position += volume
     seller.position -= volume
 
-def track_bbo(time):
+#DONE
+def track_bbo(room_id, time):
     time = util.strtime(time)
     bbid = 0 if len(bids) == 0 else bids[0].limit
     boffer = 100 if len(asks) == 0 else asks[0].limit
@@ -107,13 +114,25 @@ def handle_connect(auth):
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    users[sessions[request.sid]].sid.remove(request.sid)
+    sessions.pop(request.sid)
     print('Client disconnected')
 
-@app.route('/buy/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
-def buy(limit, quantity, user_id):
+@app.route('/sessions/<user_id>')
+def get_sessions(user_id):
+    print(users[user_id].sid)
+
+# DONE
+@app.route('/buy/room/<room_id>/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
+def buy(room_id, limit, quantity, user_id):
     global bbo_broadcast_i
     global lb_broadcast_i
     global ls_broadcast_i
+
+    room = rooms[room_id]
+    users = room.users
+    bids = room.bids
+    asks = room.asks
 
     limit = round(float(limit), 2)
     quantity = int(quantity)
@@ -147,18 +166,19 @@ def buy(limit, quantity, user_id):
         emit_set('update_user_data', buyer.getData(), buyer.sid)
 
     if track_bbo(datetime.now()):
-        socketio.emit('update_bbo_history', get_bbo_history(bbo_broadcast_i))
-        bbo_broadcast_i = len(best_bid_p)
+        socketio.emit('update_bbo_history', get_bbo_history(room, bbo_broadcast_i))
+        room.bbo_broadcast_i = len(room.best_bid_p)
 
     if traded:
         socketio.emit('update_ld_history', get_last_dones(lb_broadcast_i, ls_broadcast_i))
-        lb_broadcast_i = len(last_buy_p)
-        ls_broadcast_i = len(last_sell_p)
+        room.lb_broadcast_i = len(room.last_buy_p)
+        room.ls_broadcast_i = len(room.last_sell_p)
 
     return "Success"
 
-@app.route('/sell/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
-def sell(limit, quantity, user_id):
+# DONE
+@app.route('/sell/room/<room_id>/limit/<limit>/quantity/<quantity>/user_id/<user_id>')
+def sell(room_id, limit, quantity, user_id):
     global bbo_broadcast_i
     global lb_broadcast_i
     global ls_broadcast_i
@@ -204,8 +224,9 @@ def sell(limit, quantity, user_id):
 
     return "Success"
 
+# DONE
 @app.route('/delete-order/<order_id>')
-def delete_order(order_id):
+def delete_order(room_id, order_id):
     global bbo_broadcast_i
 
     for bid in bids:
@@ -232,6 +253,7 @@ def delete_order(order_id):
 
     return "Order number not found" # These return statements are never used
     
+#DONE
 @app.route('/login/<username>')
 def handle_login(username):    
     user = None
@@ -244,6 +266,7 @@ def handle_login(username):
 
     return user.user_id
 
+#DONE
 @app.route('/user-data/<user_id>')
 def get_user_data(user_id):
     if user_id in users:
@@ -251,15 +274,17 @@ def get_user_data(user_id):
     else:
         return "User not found"
 
+#DONE
 @app.route('/order-book')
-def get_order_book():
+def get_order_book(room_id):
     return {
         'bids': [{'limit': b.limit, 'quantity': b.quantity} for b in bids],
         'asks': [{'limit': a.limit, 'quantity': a.quantity} for a in asks]
     }
 
+#DONE
 @app.route('/bbo-history/<index>')
-def get_bbo_history(index):
+def get_bbo_history(room_id, index):
     i = int(index)
     i2 = max(2*i - 1, 0)
 
@@ -270,8 +295,9 @@ def get_bbo_history(index):
         'ot':ot[i2:], 'op':op[i2:]
     }
 
+#DONE
 @app.route('/last-dones/<b_i>/<s_i>')
-def get_last_dones(b_i, s_i):
+def get_last_dones(room_id, b_i, s_i):
     b = int(b_i)
     s = int(s_i)
     return {

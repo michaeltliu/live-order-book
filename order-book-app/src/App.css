@@ -13,6 +13,14 @@ table, th {
   overflow: scroll;
 }
 
+ul {
+  overflow: hidden;
+  overflow-y: auto;
+  min-height:400px;
+  height:400px; 
+  max-height:400px;
+}
+
 .column {
   float: left;
   width: 33.33%;
