@@ -326,11 +326,6 @@ function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUser
           setRoomId(response.room_id)
         });
       });
-      /*
-      const response = await fetch(`http://127.0.0.1:5000/create-room/${createRoomName}`);
-      const room_id = await response.text();
-      await requestRoomUserData(room_id, userData.user_id, setRoomUserData);
-      setRoomId(room_id);*/
     }
   } 
 
@@ -365,7 +360,8 @@ function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUser
           <select>
             <option value=""></option>
             {yourRoomsList}
-          </select>
+          </select> <br></br>
+          <button type="submit">Go!</button>
         </form>
       </div>
     </div>
