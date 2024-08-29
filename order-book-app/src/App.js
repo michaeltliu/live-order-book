@@ -300,20 +300,26 @@ function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUser
   const [joinRoomId, setJoinRoomId] = useState('');
   const [yourRoomSelection, setYourRoomSelection] = useState('');
 
-  console.log('in selectroomview');
-  function yourRoomsSubmit() {
+  function joinRoom(room_id) {
+    socket.emit('join-room', room_id, userData.user_id, response => {
+      setRoomUserData(response.user_data)
+      setBBOHistory(response.bbo_history)
+      setLastDones(response.ld_history)
+      setRoomId(response.room_id)
+    })
+  }
 
+  function yourRoomsSubmit(e) {
+    e.preventDefault();
+    if (yourRoomSelection !== '') {
+      joinRoom(yourRoomSelection);
+    }
   }
 
   function joinRoomSubmit(e) {
     e.preventDefault();
     if (joinRoomId.trim() !== "") {
-      socket.emit('join-room', joinRoomId, userData.user_id, response => {
-        setRoomUserData(response.user_data)
-        setBBOHistory(response.bbo_history)
-        setLastDones(response.ld_history)
-        setRoomId(response.room_id)
-      });
+      joinRoom(joinRoomId);
     }
   }
   
@@ -321,10 +327,7 @@ function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUser
     e.preventDefault();
     if (createRoomName.trim() !== "") {
       socket.emit('create-room', createRoomName, response => {
-        socket.emit('join-room', response, userData.user_id, response => {
-          setRoomUserData(response.user_data)
-          setRoomId(response.room_id)
-        });
+        joinRoom(response);
       });
     }
   } 
@@ -357,7 +360,7 @@ function SelectRoomView({socket, userData, setIsLoggedIn, setRoomId, setRoomUser
         <button onClick={() => setIsLoggedIn(false)}>Logout</button>
         <form onSubmit={yourRoomsSubmit}>
           <label>Select a room:</label>
-          <select>
+          <select value={yourRoomSelection} onChange={(e)=>setYourRoomSelection(e.target.value)}>
             <option value=""></option>
             {yourRoomsList}
           </select> <br></br>

@@ -16,9 +16,9 @@ table, th {
 ul {
   overflow: hidden;
   overflow-y: auto;
-  min-height:400px;
-  height:400px; 
-  max-height:400px;
+  min-height:20vh;
+  height:20vh; 
+  max-height:20vh;
 }
 
 .column {

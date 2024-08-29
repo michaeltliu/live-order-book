@@ -8,10 +8,13 @@ from room import Room
 from user import User
 from datetime import datetime
 import util
+import redis
 
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+redis_client = redis.Redis(decode_responses = True)
 
 rooms = {} # All existing rooms {room_id: Room}
 profiles = {} # All existing profiles {user_id: Profile}
@@ -88,6 +91,8 @@ def exit_room():
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    if request.sid in sessions:
+        exit_room()
     print('Client disconnected')
 
 @app.route('/sessions/<room_id>/<user_id>')

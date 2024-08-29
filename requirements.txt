@@ -3,4 +3,7 @@
 Flask==3.0.3
 Flask-Cors==4.0.1
 Flask-SocketIO==5.3.6
+redispy==3.0.0
 requests==2.31.0
+gunicorn==22.0.0
+Werkzeug==3.0.3
