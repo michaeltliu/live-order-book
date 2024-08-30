@@ -335,4 +335,4 @@ def get_order_book(room_id):
 
 
 if __name__ == '__main__':
-    socketio.run(app, port=5000)
+    socketio.run(app, port=5000, allow_unsafe_werkzeug=True)
