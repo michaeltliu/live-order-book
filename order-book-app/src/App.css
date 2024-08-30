@@ -7,10 +7,13 @@
   pointer-events: none;
 }
 
-table, th {
+div.wrapper {
+  overflow-y: scroll;
+  height: 600px;
+}
+
+th {
   border: 1px solid black;
-  margin: auto;
-  overflow: scroll;
 }
 
 ul {

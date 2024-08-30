@@ -7,3 +7,4 @@ redispy==3.0.0
 requests==2.31.0
 gunicorn==22.0.0
 Werkzeug==3.0.3
+setuptools==74.0.0

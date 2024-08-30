@@ -136,6 +136,15 @@ function UserDataPanel({socket, roomUserData, setRoomId}) {
 function OrderBook() {
   const [orderData, setOrderData] = useState({'bids':[], 'asks':[]});
 
+  const rows = Array(100).fill().map((_,i) => 
+    <tr>
+      <th></th>
+      <th></th>
+      <th>{i}</th>
+      <th></th>
+      <th></th>
+    </tr>
+  )
 
   return (
     <table>
@@ -149,7 +158,7 @@ function OrderBook() {
         </tr>
       </thead>
       <tbody>
-
+        {rows}
       </tbody>
     </table>
   )
@@ -181,7 +190,7 @@ function PriceHistory({bboHistory, lastDones}) {
           y: bboHistory.bb_p,
           type: 'scatter',
           mode: 'markers',
-          marker: {color: 'purple'},
+          marker: {color: 'hotpink'},
           name: 'Best bid'
         },
         {
@@ -197,7 +206,7 @@ function PriceHistory({bboHistory, lastDones}) {
           y: bboHistory.bp,
           type: 'scatter',
           mode: 'lines',
-          marker: {color: 'purple'},
+          marker: {color: 'hotpink'},
           showlegend: false,
           hoverinfo: 'skip'
         },
@@ -386,11 +395,7 @@ function RoomView({socket, roomUserData, bboHistory, lastDones, setRoomId}) {
         <br></br>
         <PriceHistory bboHistory={bboHistory} lastDones={lastDones}/>
       </div>
-      <div className="column">
-      </div>
-    </div>
-    <div className="row">
-      <div className="column">
+      <div className="wrapper">
         <OrderBook/>
       </div>
     </div>
