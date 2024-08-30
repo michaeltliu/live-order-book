@@ -9,6 +9,7 @@ from user import User
 from datetime import datetime
 import util
 import redis
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -334,5 +335,5 @@ def get_order_book(room_id):
     }
 
 
-if __name__ == '__main__':
-    socketio.run(app, port=8080, allow_unsafe_werkzeug=True)
+if __name__ == "__main__":
+    socketio.run(app, debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
