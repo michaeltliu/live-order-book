@@ -54,14 +54,14 @@ def handle_connect():
 def create_room(room_name):
     room = Room(room_name)
     rooms[room.room_id] = room
-    print(room.room_id)
+    
     return room.room_id
 
 @socketio.on('join-room')    
 def join_room(room_id, user_id):
-    print('in join room')
     profile = profiles[user_id]
     room = rooms[room_id]
+
     if room_id in profile.rooms:
         user = room.users[user_id]
         user.sid.add(request.sid)
@@ -79,7 +79,8 @@ def join_room(room_id, user_id):
         'room_id': room_id, 
         'user_data': user.getData(),
         'bbo_history': get_bbo_history(room_id, 0),
-        'ld_history':get_last_dones(room_id, 0, 0)
+        'ld_history': get_last_dones(room_id, 0, 0),
+        'order_book': get_order_book(room_id)
         }
 
 @socketio.on('exit-room')
@@ -187,6 +188,7 @@ def buy(limit, quantity):
         seller = users[asks[0].user_id]
         volume = min(asks[0].quantity, quantity)
         settle_trade(room, volume, asks[0].limit, buyer, seller, True)
+        emit_set('update_order_book', {'side': False, 'limit': int(asks[0].limit), 'quantity': -volume}, room.sessions.keys())
 
         quantity -= volume
         asks[0].quantity -= volume
@@ -204,7 +206,7 @@ def buy(limit, quantity):
         heapq.heappush(bids, bid)
         buyer.orders.append(bid)
         emit_set('update_roomuser_data', buyer.getData(), buyer.sid)
-        print('hi', buyer.getData(), buyer.sid)
+        emit_set('update_order_book', {'side': True, 'limit': int(limit), 'quantity': quantity}, room.sessions.keys())
 
     if track_bbo(room, datetime.now()):
         emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
@@ -235,6 +237,7 @@ def sell(limit, quantity):
         buyer = users[bids[0].user_id]
         volume = min(bids[0].quantity, quantity)
         settle_trade(room, volume, bids[0].limit, buyer, seller, False)
+        emit_set('update_order_book', {'side': True, 'limit': int(bids[0].limit), 'quantity': -volume}, room.sessions.keys())
 
         quantity -= volume
         bids[0].quantity -= volume
@@ -252,6 +255,7 @@ def sell(limit, quantity):
         heapq.heappush(asks, ask)
         seller.orders.append(ask)
         emit_set('update_roomuser_data', seller.getData(), seller.sid)
+        emit_set('update_order_book', {'side': False, 'limit': int(limit), 'quantity': quantity}, room.sessions.keys())
 
     if track_bbo(room, datetime.now()):
         emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
@@ -276,6 +280,7 @@ def delete_order(order_id):
             bids.remove(bid)
             user.orders.remove(bid)
             emit_set('update_roomuser_data', user.getData(), user.sid)
+            emit_set('update_order_book', {'side': True, 'limit': int(bid.limit), 'quantity': -bid.quantity}, room.sessions.keys())
 
             if track_bbo(room, datetime.now()):
                 emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
@@ -287,6 +292,7 @@ def delete_order(order_id):
             asks.remove(ask)
             user.orders.remove(ask)
             emit_set('update_roomuser_data', user.getData(), user.sid)
+            emit_set('update_order_book', {'side': False, 'limit': int(ask.limit), 'quantity': -ask.quantity}, room.sessions.keys())
 
             if track_bbo(room, datetime.now()):
                 emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
@@ -329,11 +335,18 @@ def get_last_dones(room_id, b_i, s_i):
 @app.route('/order-book/<room_id>')
 def get_order_book(room_id):
     room = rooms[room_id]
-    return {
-        'bids': [{'limit': b.limit, 'quantity': b.quantity} for b in room.bids],
-        'asks': [{'limit': a.limit, 'quantity': a.quantity} for a in room.asks]
-    }
+    bfreq = {}
+    afreq = {}
+
+    for bid in room.bids:
+        bfreq[int(bid.limit)] = bfreq.get(int(bid.limit), 0) + bid.quantity
+    for ask in room.asks:
+        afreq[int(ask.limit)] = afreq.get(int(ask.limit), 0) + ask.quantity
+
+    d = {'bids': bfreq, 'asks': afreq}
+    print(d)
+    return d
 
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
