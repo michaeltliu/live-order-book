@@ -35,7 +35,8 @@ def get_room_and_user(sid):
     return room_id, room, user_id, user
 
 @app.route('/login/<username>')
-def handle_login(username):    
+def handle_login(username):
+    print('handle_login ', username)
     profile = None
     for p in profiles.values():
         if username == p.username:
@@ -52,6 +53,7 @@ def handle_connect():
 
 @socketio.on('create-room')
 def create_room(room_name):
+    print('create_room ', room_name)
     room = Room(room_name)
     rooms[room.room_id] = room
     
@@ -59,6 +61,7 @@ def create_room(room_name):
 
 @socketio.on('join-room')    
 def join_room(room_id, user_id):
+    print('join-room ', room_id, user_id)
     profile = profiles[user_id]
     room = rooms[room_id]
 
@@ -85,6 +88,7 @@ def join_room(room_id, user_id):
 
 @socketio.on('exit-room')
 def exit_room():
+    print('exit_room')
     room_id, room, user_id, user = get_room_and_user(request.sid)
 
     user.sid.remove(request.sid)
