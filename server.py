@@ -10,10 +10,11 @@ from datetime import datetime
 import util
 import redis
 import os
+from hashlib import sha256
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*")#, async_mode='gevent')
 
 redis_client = redis.Redis(decode_responses = True)
 
@@ -34,18 +35,28 @@ def get_room_and_user(sid):
 
     return room_id, room, user_id, user
 
-@app.route('/login/<username>')
-def handle_login(username):
-    print('handle_login ', username)
+@app.route('/login', methods = ['POST'])
+def handle_login():
+    print('handle_login')
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
     profile = None
     for p in profiles.values():
         if username == p.username:
-            profile = p
+            if sha256((password + p.salt).encode('utf-8')).hexdigest() == p.sha:
+                profile = p
+            else:
+                return {'success': False}
+
     if profile == None:
-        profile = Profile(username)
+        salt = util.generate_salt()
+        sha = sha256((password + salt).encode('utf-8')).hexdigest()
+        profile = Profile(username, salt, sha)
         profiles[profile.user_id] = profile
 
-    return {'user_id':profile.user_id, 'rooms':list(profile.rooms)}
+    return {'success': True, 'user_id':profile.user_id, 'rooms':list(profile.rooms)}
 
 @socketio.on('connect')
 def handle_connect():    
@@ -53,7 +64,7 @@ def handle_connect():
 
 @socketio.on('create-room')
 def create_room(room_name):
-    print('create_room ', room_name)
+    print('create_room', room_name)
     room = Room(room_name)
     rooms[room.room_id] = room
     
@@ -61,7 +72,7 @@ def create_room(room_name):
 
 @socketio.on('join-room')    
 def join_room(room_id, user_id):
-    print('join-room ', room_id, user_id)
+    print('join-room', room_id, user_id)
     profile = profiles[user_id]
     room = rooms[room_id]
 
@@ -348,9 +359,17 @@ def get_order_book(room_id):
         afreq[int(ask.limit)] = afreq.get(int(ask.limit), 0) + ask.quantity
 
     d = {'bids': bfreq, 'asks': afreq}
-    print(d)
     return d
 
+@app.route('/all-player-stats/<room_id>')
+def get_all_player_stats(room_id):
+    room = rooms[room_id]
+    users = room.users
+    return [{
+        'username': user.username,
+        'cash': user.cash,
+        'position': user.position
+    } for user in room.users.values()]
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
