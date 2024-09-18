@@ -1,362 +1,285 @@
-import heapq
-from order import Bid, Ask, Trade
 from flask import Flask, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-from profile import Profile
-from room import Room
-from user import User
-from datetime import datetime
+from datetime import datetime, timedelta
 import util
-import redis
+#import redis
 import os
 from hashlib import sha256
+from db_connector import DB_Connector
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")#, async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
-redis_client = redis.Redis(decode_responses = True)
+# redis_client = redis.Redis(decode_responses = True)
 
-rooms = {} # All existing rooms {room_id: Room}
-profiles = {} # All existing profiles {user_id: Profile}
-sessions = {} # All existing sessions and corresponding room, '' indicates SelectRoomView {sid: room_id}
-# Might want map from session id to user id
+session_to_user = {}
+user_to_sessions = {}
+room_to_sessions = {}
+session_to_profile = {}
+token_to_profile = {}
 
 def emit_set(event, data, sid_set):
     for sid in sid_set:
         socketio.emit(event, data, to=sid)
 
-def get_room_and_user(sid):
-    room_id = sessions[sid]
-    room = rooms[room_id]
-    user_id = room.sessions[sid]
-    user = room.users[user_id]
-
-    return room_id, room, user_id, user
-
 @app.route('/login', methods = ['POST'])
 def handle_login():
-    print('handle_login')
     data = request.get_json()
-    username = data.get('username')
+    username = data.get('username').lower()
     password = data.get('password')
+    print('handle_login', username)
 
-    profile = None
-    for p in profiles.values():
-        if username == p.username:
-            if sha256((password + p.salt).encode('utf-8')).hexdigest() == p.sha:
-                profile = p
+    with DB_Connector() as db:
+        d = db.get_profile(username)
+        if d:
+            if sha256((password + d['salt']).encode('utf-8')).hexdigest() == d['sha']:
+                profile_id = d['id']
+                rooms = db.get_profile_rooms(d['id'])
             else:
-                return {'success': False}
+                return {'status': False}
+        else:
+            salt = util.generate_salt()
+            sha = sha256((password + salt).encode('utf-8')).hexdigest()
+            profile_id = db.add_profile(username, salt, sha)
+            if not profile_id:
+                return {'status': False}
+            rooms = []
+        
+    time = datetime.now()
+    nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
+    token = sha256(nonce.encode('utf-8')).hexdigest()
+    token_to_profile[token] = (profile_id, time)
 
-    if profile == None:
-        salt = util.generate_salt()
-        sha = sha256((password + salt).encode('utf-8')).hexdigest()
-        profile = Profile(username, salt, sha)
-        profiles[profile.user_id] = profile
-
-    return {'success': True, 'user_id':profile.user_id, 'rooms':list(profile.rooms)}
+    return {
+        'status': True,
+        'profile_id': profile_id,
+        'token': token,
+        'rooms': rooms
+        }
 
 @socketio.on('connect')
-def handle_connect():    
-    print('Client connected')
+def handle_connect(auth):
+    token = auth.get('token')
+    profile_id = auth.get('profile_id')
+    if token in token_to_profile:
+        p, time = token_to_profile.pop(token)
+        if p == profile_id and datetime.now() < time + timedelta(minutes = 1):
+            session_to_profile[request.sid] = profile_id
+            print('Client connected', request.sid)
+        else:
+            print('Bad or expired token')
+            return False
+    else:
+        print('Bad token')
+        return False
 
 @socketio.on('create-room')
 def create_room(room_name):
     print('create_room', room_name)
-    room = Room(room_name)
-    rooms[room.room_id] = room
-    
-    return room.room_id
+    join_code = util.random_id(5)
+    with DB_Connector() as db:
+        while not db.add_room(join_code, room_name):
+            continue
+    print('create room success', join_code, room_name)
+    return join_code
 
 @socketio.on('join-room')    
-def join_room(room_id, user_id):
-    print('join-room', room_id, user_id)
-    profile = profiles[user_id]
-    room = rooms[room_id]
+def join_room(join_code):
+    print('join-room', join_code)
 
-    if room_id in profile.rooms:
-        user = room.users[user_id]
-        user.sid.add(request.sid)
-    else:
-        user = User(profile.username, profile.user_id)
-        user.sid.add(request.sid)
-        room.users[user_id] = user
-        profile.rooms.add(room_id)
-        emit('update_user_data', {'user_id': user_id, 'rooms': list(profile.rooms)})
+    profile_id = session_to_profile[request.sid]
 
-    room.sessions[request.sid] = user_id
-    sessions[request.sid] = room_id
+    with DB_Connector() as db:
+        room_id = db.get_room_id(join_code)
+        d = db.get_user_from_room_profile(room_id, profile_id)
+
+        if d:
+            user_data = db.compile_user_data(d)
+
+        else:
+            u = db.get_username(profile_id)
+            x = db.add_user(room_id, profile_id)
+            emit('update_user_data', {
+                'profile_id': profile_id, 
+                'rooms': util.stringifyTimes(db.get_profile_rooms(profile_id), 'creation_time')
+                })
+
+            user_data = {
+                'username': u, 'user_id': x,
+                'cash': 0, 'position': 0,
+                'orders': [], 'trades': []
+            }
+
+        # TODO: is there a way to only keep certain keys of these 2 dicts?
+        bbo = db.get_bbo_history(room_id)
+        ld = db.get_room_trades(room_id)
+        
+    session_to_user[request.sid] = (user_data['user_id'], room_id)
+    user_to_sessions.setdefault(user_data['user_id'], set()).add(request.sid)
+    room_to_sessions.setdefault(room_id, set()).add(request.sid)
 
     return {
         'room_id': room_id, 
-        'user_data': user.getData(),
-        'bbo_history': get_bbo_history(room_id, 0),
-        'ld_history': get_last_dones(room_id, 0, 0),
+        'user_data': user_data,
+        'bbo_history': util.stringifyTimes(bbo, 'bbo_time'),
+        'ld_history': util.stringifyTimes(ld, 'creation_time'),
         'order_book': get_order_book(room_id)
         }
 
 @socketio.on('exit-room')
 def exit_room():
-    print('exit_room')
-    room_id, room, user_id, user = get_room_and_user(request.sid)
-
-    user.sid.remove(request.sid)
-    room.sessions.pop(request.sid)
-    sessions.pop(request.sid)
+    user_id, room_id = session_to_user.pop(request.sid)
+    user_to_sessions[user_id].remove(request.sid)
+    room_to_sessions[room_id].remove(request.sid)
+    print('exit_room', user_id, room_id)
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    if request.sid in sessions:
+    if request.sid in session_to_user:
         exit_room()
-    print('Client disconnected')
+    p = session_to_profile.pop(request.sid)
+    print('Client disconnected', p)
 
+# TODO: NEEEDS TO BE DELETED BEFORE PUSHING TO PROD
 @app.route('/sessions/<room_id>/<user_id>')
 def get_sessions(room_id, user_id):
     room = rooms[room_id]
     users = room.users
     return list(users[user_id].sid)
 
-def settle_trade(room, volume, price, buyer, seller, buy_aggr):
-    trade = Trade(volume, price, buyer.username, seller.username, buy_aggr)
-    buyer.trades.append(trade)
-    seller.trades.append(trade)
-    room.trades.append(trade)
-
-    if buy_aggr:
-        room.last_buy_t.append(util.strtime(trade.trade_time))
-        room.last_buy_p.append(price)
-    else:
-        room.last_sell_t.append(util.strtime(trade.trade_time))
-        room.last_sell_p.append(price)
-
-    notional = volume * price
-    buyer.cash -= notional
-    seller.cash += notional
-    buyer.position += volume
-    seller.position -= volume
-
-def track_bbo(room, time):
-    time = util.strtime(time)
-    bids = room.bids
-    asks = room.asks
-    best_bid_t = room.best_bid_t
-    best_bid_p = room.best_bid_p
-    best_offer_t = room.best_offer_t
-    best_offer_p = room.best_offer_p
-    bt = room.bt
-    bp = room.bp
-    ot = room.ot
-    op = room.op
-
-    bbid = 0 if len(bids) == 0 else bids[0].limit
-    boffer = 100 if len(asks) == 0 else asks[0].limit
-    
-    if len(best_bid_p) == 0:
-        # BBO is empty so add first point to plot
-        best_bid_t.append(time)
-        best_bid_p.append(bbid)
-        best_offer_t.append(time)
-        best_offer_p.append(boffer)
-        
-        bt.append(time)
-        bp.append(bbid)
-        ot.append(time)
-        op.append(boffer)
-
-        return True
-
-    elif best_bid_p[-1] == bbid and best_offer_p[-1] == boffer:
-        # BBO is unchanged
-        return False
-
-    else:
-        # BBO is nonempty so add point and draw line
-        bt.extend([time, time])
-        bp.extend([best_bid_p[-1], bbid])
-        ot.extend([time, time])
-        op.extend([best_offer_p[-1], boffer])
-
-        best_bid_t.append(time)
-        best_bid_p.append(bbid)
-        best_offer_t.append(time)
-        best_offer_p.append(boffer)
-
-        return True
-
 @socketio.on('buy')
 def buy(limit, quantity):
-    room_id, room, user_id, buyer = get_room_and_user(request.sid)
-    users = room.users
-    bids = room.bids
-    asks = room.asks
-
-    limit = round(float(limit), 2)
+    buyer_id, room_id = session_to_user[request.sid]
+    limit = int(limit)
     quantity = int(quantity)
-    bid = Bid(limit, quantity, user_id)
 
-    traded = False
+    users_to_update = { buyer_id }
+    orderbook_updates = []
+    lastdone_updates = []
 
-    while len(asks) > 0 and asks[0].limit <= limit and quantity > 0:
-        traded = True
-        seller = users[asks[0].user_id]
-        volume = min(asks[0].quantity, quantity)
-        settle_trade(room, volume, asks[0].limit, buyer, seller, True)
-        emit_set('update_order_book', {'side': False, 'limit': int(asks[0].limit), 'quantity': -volume}, room.sessions.keys())
+    with DB_Connector() as db:
 
-        quantity -= volume
-        asks[0].quantity -= volume
-        if asks[0].quantity == 0:
-            seller.orders.remove(asks[0])
-            heapq.heappop(asks)
+        best_ask = db.get_best_ask(room_id)
+        while best_ask and best_ask['limit_price'] <= limit and quantity > 0:
+            seller_id = best_ask['user_id']
+            volume = min(best_ask['quantity'], quantity)
+            lastdone_updates.append(db.settle_trade(volume, best_ask['limit_price'], room_id, buyer_id, seller_id, True))
+            orderbook_updates.append({'side': False, 'limit': best_ask['limit_price'], 'quantity': -volume})
 
-        emit_set('update_roomuser_data', seller.getData(), seller.sid)
-        emit_set('update_roomuser_data', buyer.getData(), buyer.sid)
+            quantity -= volume
+            if best_ask['quantity'] == volume:
+                db.delete_order('S', best_ask['id'], seller_id)
+            else:
+                db.update_ask_quantity(best_ask['id'], -volume)
+            
+            users_to_update.add(seller_id)
 
-        # TODO: Associate a user's trade with its order
+            best_ask = db.get_best_ask(room_id)
 
-    if quantity > 0:
-        bid.quantity = quantity
-        heapq.heappush(bids, bid)
-        buyer.orders.append(bid)
-        emit_set('update_roomuser_data', buyer.getData(), buyer.sid)
-        emit_set('update_order_book', {'side': True, 'limit': int(limit), 'quantity': quantity}, room.sessions.keys())
+        if quantity > 0:
+            db.add_bid(buyer_id, room_id, limit, quantity)
+            orderbook_updates.append({'side': True, 'limit': int(limit), 'quantity': quantity})
 
-    if track_bbo(room, datetime.now()):
-        emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
-        room.bbo_broadcast_i = len(room.best_bid_p)
+        for trade_id in lastdone_updates:
+            emit_set('update_ld_history', 
+            util.stringifyTime(db.get_trade_by_id(trade_id), 'creation_time'), 
+            room_to_sessions[room_id])
+        
+        for user_id in users_to_update:
+            emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+        
+    for order in orderbook_updates:
+        emit_set('update_order_book', order, room_to_sessions[room_id])
 
-    if traded:
-        emit_set('update_ld_history', get_last_dones(room_id, room.lb_broadcast_i, room.ls_broadcast_i), room.sessions.keys())
-        room.lb_broadcast_i = len(room.last_buy_p)
-        room.ls_broadcast_i = len(room.last_sell_p)
+    track_and_emit_bbo(room_id)
 
     return "Success"
 
 @socketio.on('sell')
 def sell(limit, quantity):
-    room_id, room, user_id, seller = get_room_and_user(request.sid)
-    users = room.users
-    bids = room.bids
-    asks = room.asks
-
-    limit = round(float(limit), 2)
+    seller_id, room_id = session_to_user[request.sid]
+    limit = int(limit)
     quantity = int(quantity)
-    ask = Ask(limit, quantity, user_id)
 
-    traded = False
+    users_to_update = { seller_id }
+    orderbook_updates = []
+    lastdone_updates = []
 
-    while len(bids) > 0 and bids[0].limit >= limit and quantity > 0:
-        traded = True
-        buyer = users[bids[0].user_id]
-        volume = min(bids[0].quantity, quantity)
-        settle_trade(room, volume, bids[0].limit, buyer, seller, False)
-        emit_set('update_order_book', {'side': True, 'limit': int(bids[0].limit), 'quantity': -volume}, room.sessions.keys())
+    with DB_Connector() as db:
 
-        quantity -= volume
-        bids[0].quantity -= volume
-        if bids[0].quantity == 0:
-            buyer.orders.remove(bids[0])
-            heapq.heappop(bids)
+        best_bid = db.get_best_bid(room_id)
+        while best_bid and best_bid['limit_price'] >= limit and quantity > 0:
+            buyer_id = best_bid['user_id']
+            volume = min(best_bid['quantity'], quantity)
+            lastdone_updates.append(db.settle_trade(volume, best_bid['limit_price'], room_id, buyer_id, seller_id, False))
+            orderbook_updates.append({'side': True, 'limit': best_bid['limit_price'], 'quantity': -volume})
 
-        emit_set('update_roomuser_data', buyer.getData(), buyer.sid)
-        emit_set('update_roomuser_data', seller.getData(), seller.sid)
+            quantity -= volume
+            if best_bid['quantity'] == volume:
+                db.delete_order('B', best_bid['id'], seller_id)
+            else:
+                db.update_ask_quantity(best_bid['id'], -volume)
+            
+            users_to_update.add(buyer_id)
 
-        # TODO: Associate a user's trade with its order
+            best_bid = db.get_best_bid(room_id)
 
-    if quantity > 0:
-        ask.quantity = quantity
-        heapq.heappush(asks, ask)
-        seller.orders.append(ask)
-        emit_set('update_roomuser_data', seller.getData(), seller.sid)
-        emit_set('update_order_book', {'side': False, 'limit': int(limit), 'quantity': quantity}, room.sessions.keys())
+        if quantity > 0:
+            db.add_ask(seller_id, room_id, limit, quantity)
+            orderbook_updates.append({'side': False, 'limit': int(limit), 'quantity': quantity})
 
-    if track_bbo(room, datetime.now()):
-        emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
-        room.bbo_broadcast_i = len(room.best_bid_p)
+        for trade_id in lastdone_updates:
+            emit_set('update_ld_history', 
+            util.stringifyTime(db.get_trade_by_id(trade_id), 'creation_time'), 
+            room_to_sessions[room_id])
+        
+        for user_id in users_to_update:
+            emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+        
+    for order in orderbook_updates:
+        emit_set('update_order_book', order, room_to_sessions[room_id])
 
-    if traded:
-        emit_set('update_ld_history', get_last_dones(room_id, room.lb_broadcast_i, room.ls_broadcast_i), room.sessions.keys())
-        room.lb_broadcast_i = len(room.last_buy_p)
-        room.ls_broadcast_i = len(room.last_sell_p)
+    track_and_emit_bbo(room_id)
 
     return "Success"
 
 @socketio.on('delete')
-def delete_order(order_id):
-    room_id, room, user_id, user = get_room_and_user(request.sid)
-    users = room.users
-    bids = room.bids
-    asks = room.asks
+def delete_order(order_side, order_id):
+    user_id, room_id = session_to_user[request.sid]
+    with DB_Connector() as db:
+        order = db.get_order_by_id(order_side, order_id)
+        db.delete_order(order_side, order_id, user_id)
+        emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+        emit_set('update_order_book', 
+        {'side': order_side == 'B', 'limit': order['limit_price'], 'quantity': -order['quantity']}, 
+        room_to_sessions[room_id])
 
-    for bid in bids:
-        if bid.order_id == order_id:
-            bids.remove(bid)
-            user.orders.remove(bid)
-            emit_set('update_roomuser_data', user.getData(), user.sid)
-            emit_set('update_order_book', {'side': True, 'limit': int(bid.limit), 'quantity': -bid.quantity}, room.sessions.keys())
+    track_and_emit_bbo(room_id)
 
-            if track_bbo(room, datetime.now()):
-                emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
-                room.bbo_broadcast_i = len(room.best_bid_p)
-            return "Success"
-            
-    for ask in asks:
-        if ask.order_id == order_id:
-            asks.remove(ask)
-            user.orders.remove(ask)
-            emit_set('update_roomuser_data', user.getData(), user.sid)
-            emit_set('update_order_book', {'side': False, 'limit': int(ask.limit), 'quantity': -ask.quantity}, room.sessions.keys())
+def track_and_emit_bbo(room_id):
+    with DB_Connector() as db:
+        old_bbo = db.get_latest_bbo_history(room_id)
+        b, o = db.get_bbo_from_orders(room_id)
+        cb, co = b if b else 0, o if o else 100
+        if not old_bbo or (old_bbo['best_bid'], old_bbo['best_offer']) != (cb, co): # bbo is empty or bbo has changed:
+            db.add_bbo_history(room_id, cb, co)
+            emit_set(
+                'update_bbo_history', 
+                util.stringifyTime(db.get_latest_bbo_history(room_id), 'bbo_time'), 
+                room_to_sessions[room_id])
 
-            if track_bbo(room, datetime.now()):
-                emit_set('update_bbo_history', get_bbo_history(room_id, room.bbo_broadcast_i), room.sessions.keys())
-                room.bbo_broadcast_i = len(room.best_bid_p)
-            return "Success"
-
-    return "Order number not found" # These return statements are never used
-
-@app.route('/user-data/<room_id>/<user_id>')
-def get_user_data(room_id, user_id):
-    room = rooms[room_id]
-    if user_id in room.users:
-        return room.users[user_id].getData()
-    else:
-        return "User not found"
-
-@app.route('/bbo-history/<room_id>/<index>')
-def get_bbo_history(room_id, index):
-    room = rooms[room_id]
-    i = int(index)
-    i2 = max(2*i - 1, 0)
-
-    return {
-        'bb_t': room.best_bid_t[i:], 'bb_p': room.best_bid_p[i:],
-        'bo_t': room.best_offer_t[i:], 'bo_p': room.best_offer_p[i:],
-        'bt': room.bt[i2:], 'bp': room.bp[i2:], 
-        'ot': room.ot[i2:], 'op': room.op[i2:]
-    }
-
-@app.route('/last-dones/<room_id>/<b_i>/<s_i>')
-def get_last_dones(room_id, b_i, s_i):
-    room = rooms[room_id]
-    b = int(b_i)
-    s = int(s_i)
-    return {
-        'buy_t': room.last_buy_t[b:], 'buy_p': room.last_buy_p[b:], 
-        'sell_t': room.last_sell_t[s:], 'sell_p': room.last_sell_p[s:],
-    }
 
 @app.route('/order-book/<room_id>')
 def get_order_book(room_id):
-    room = rooms[room_id]
     bfreq = {}
     afreq = {}
-
-    for bid in room.bids:
-        bfreq[int(bid.limit)] = bfreq.get(int(bid.limit), 0) + bid.quantity
-    for ask in room.asks:
-        afreq[int(ask.limit)] = afreq.get(int(ask.limit), 0) + ask.quantity
+    with DB_Connector() as db:
+        for bid in db.get_room_bids(room_id):
+            bfreq[bid['limit_price']] = bfreq.get(bid['limit_price'], 0) + bid['quantity']
+        for ask in db.get_room_asks(room_id):
+            afreq[ask['limit_price']] = afreq.get(ask['limit_price'], 0) + ask['quantity']
 
     d = {'bids': bfreq, 'asks': afreq}
     return d

@@ -1,7 +1,0 @@
-{
-  "dependencies": {
-    "plotly.js": "^2.34.0",
-    "react-plotly.js": "^2.6.0",
-    "socket.io-client": "^4.7.5"
-  }
-}

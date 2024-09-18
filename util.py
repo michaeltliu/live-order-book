@@ -13,4 +13,10 @@ def repeatArray(arr, k):
     return [arr[i//k] for i in range(k*len(arr))]
 
 def strtime(dt):
-    return dt.strftime('%d %b %Y %H:%M:%S.%f')
+    return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')
+
+def stringifyTimes(arr, key):
+    return [{**d, key: strtime(d[key])} for d in arr]
+
+def stringifyTime(d, key):
+    return {**d, key: strtime(d[key])}
