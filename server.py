@@ -65,7 +65,7 @@ def handle_connect(auth):
     token = auth.get('token')
     profile_id = auth.get('profile_id')
     if token in token_to_profile:
-        p, time = token_to_profile.pop(token)
+        p, time = token_to_profile.get(token)
         if p == profile_id and datetime.now() < time + timedelta(minutes = 1):
             session_to_profile[request.sid] = profile_id
             print(datetime.now(), 'Client connected', request.sid)
