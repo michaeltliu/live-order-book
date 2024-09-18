@@ -61,18 +61,19 @@ def handle_login():
 
 @socketio.on('connect')
 def handle_connect(auth):
+    print('auth', auth)
     token = auth.get('token')
     profile_id = auth.get('profile_id')
     if token in token_to_profile:
         p, time = token_to_profile.pop(token)
         if p == profile_id and datetime.now() < time + timedelta(minutes = 1):
             session_to_profile[request.sid] = profile_id
-            print('Client connected', request.sid)
+            print(datetime.now(), 'Client connected', request.sid)
         else:
-            print('Bad or expired token')
+            print(datetime.now(), 'Bad or expired token')
             return False
     else:
-        print('Bad token')
+        print(datetime.now(), 'Bad token')
         return False
 
 @socketio.on('create-room')
@@ -140,7 +141,7 @@ def handle_disconnect():
     if request.sid in session_to_user:
         exit_room()
     p = session_to_profile.pop(request.sid)
-    print('Client disconnected', p)
+    print(datetime.now(), 'Client disconnected', p)
 
 # TODO: NEEEDS TO BE DELETED BEFORE PUSHING TO PROD
 @app.route('/sessions/<room_id>/<user_id>')
