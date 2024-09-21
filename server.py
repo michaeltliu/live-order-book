@@ -51,7 +51,7 @@ def handle_login():
     nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
     token = sha256(nonce.encode('utf-8')).hexdigest()
     token_to_profile[token] = (profile_id, time)
-
+    print('created this token', token)
     return {
         'status': True,
         'profile_id': profile_id,
@@ -64,9 +64,10 @@ def handle_connect(auth):
     print('auth', auth)
     token = auth.get('token')
     profile_id = auth.get('profile_id')
+    print('tokens', token_to_profile)
     if token in token_to_profile:
         p, time = token_to_profile.get(token)
-        if p == profile_id and datetime.now() < time + timedelta(minutes = 1):
+        if p == profile_id and datetime.now() < time + timedelta(minutes = 30):
             session_to_profile[request.sid] = profile_id
             print(datetime.now(), 'Client connected', request.sid)
         else:
