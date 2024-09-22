@@ -63,9 +63,9 @@ class DB_Connector:
     def get_room_id(self, join_code):
         with self.connection.cursor() as cursor:
             sql = "SELECT id FROM rooms WHERE join_code = %s LIMIT 1;"
-            if cursor.execute(sql, (join_code)):
-                d = cursor.fetchone()
-        return d['id']
+            cursor.execute(sql, (join_code))
+            d = cursor.fetchone()
+        return d.get('id') if d else None
 
     def add_user(self, room_id, profile_id):
         with self.connection.cursor() as cursor:

@@ -7,6 +7,7 @@ import util
 import os
 from hashlib import sha256
 from db_connector import DB_Connector
+import uuid
 
 app = Flask(__name__)
 CORS(app)
@@ -64,7 +65,7 @@ def handle_connect(auth):
     print('auth', auth)
     token = auth.get('token')
     profile_id = auth.get('profile_id')
-    print('tokens', token_to_profile)
+    print(uuid.getnode(), 'tokens', token_to_profile)
     if token in token_to_profile:
         p, time = token_to_profile.get(token)
         if p == profile_id and datetime.now() < time + timedelta(minutes = 30):
@@ -95,6 +96,8 @@ def join_room(join_code):
 
     with DB_Connector() as db:
         room_id = db.get_room_id(join_code)
+        if not room_id:
+            return {'status': False}
         d = db.get_user_from_room_profile(room_id, profile_id)
 
         if d:
@@ -123,6 +126,7 @@ def join_room(join_code):
     room_to_sessions.setdefault(room_id, set()).add(request.sid)
 
     return {
+        'status': True,
         'room_id': room_id, 
         'user_data': user_data,
         'bbo_history': util.stringifyTimes(bbo, 'bbo_time'),
