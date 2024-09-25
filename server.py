@@ -53,6 +53,7 @@ def handle_login():
     token = sha256(nonce.encode('utf-8')).hexdigest()
     token_to_profile[token] = (profile_id, time)
     print(uuid.getnode(), 'created this token', token)
+    print(uuid.getnode(), 'tokens after adding', token_to_profile)
     return {
         'status': True,
         'profile_id': profile_id,
