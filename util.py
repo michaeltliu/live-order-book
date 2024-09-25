@@ -20,3 +20,9 @@ def stringifyTimes(arr, key):
 
 def stringifyTime(d, key):
     return {**d, key: strtime(d[key])}
+
+def trimDict(d, arr):
+    return {key: d[key] for key in arr if key in arr}
+
+def dictifyArray(arr, key):
+    return {e[key]: {**e} for e in arr}

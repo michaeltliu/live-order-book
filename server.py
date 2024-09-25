@@ -52,7 +52,7 @@ def handle_login():
     nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
     token = sha256(nonce.encode('utf-8')).hexdigest()
     token_to_profile[token] = (profile_id, time)
-    print('created this token', token)
+    print(uuid.getnode(), 'created this token', token)
     return {
         'status': True,
         'profile_id': profile_id,
@@ -95,21 +95,24 @@ def join_room(join_code):
     profile_id = session_to_profile[request.sid]
 
     with DB_Connector() as db:
-        room_id = db.get_room_id(join_code)
-        if not room_id:
+        room = db.get_room(join_code)
+        if room:
+            room_id = room['id']
+        else:
             return {'status': False}
+        
         d = db.get_user_from_room_profile(room_id, profile_id)
-
         if d:
             user_data = db.compile_user_data(d)
-
         else:
             u = db.get_username(profile_id)
             x = db.add_user(room_id, profile_id)
+            # TODO: technically this does not update other profile's sessions
             emit('update_user_data', {
                 'profile_id': profile_id, 
                 'rooms': util.stringifyTimes(db.get_profile_rooms(profile_id), 'creation_time')
                 })
+            emit_set('update_player_data', {'username': u, 'cash': 0, 'position': 0}, room_to_sessions.get(room_id, []))
 
             user_data = {
                 'username': u, 'user_id': x,
@@ -120,6 +123,7 @@ def join_room(join_code):
         # TODO: is there a way to only keep certain keys of these 2 dicts?
         bbo = db.get_bbo_history(room_id)
         ld = db.get_room_trades(room_id)
+        players = db.get_room_players(room_id)
         
     session_to_user[request.sid] = (user_data['user_id'], room_id)
     user_to_sessions.setdefault(user_data['user_id'], set()).add(request.sid)
@@ -127,11 +131,12 @@ def join_room(join_code):
 
     return {
         'status': True,
-        'room_id': room_id, 
+        'room_info': util.stringifyTime(room, 'creation_time'), 
         'user_data': user_data,
         'bbo_history': util.stringifyTimes(bbo, 'bbo_time'),
         'ld_history': util.stringifyTimes(ld, 'creation_time'),
-        'order_book': get_order_book(room_id)
+        'order_book': get_order_book(room_id),
+        'player_data': util.dictifyArray(players, 'username')
         }
 
 @socketio.on('exit-room')
@@ -148,13 +153,6 @@ def handle_disconnect():
     p = session_to_profile.pop(request.sid)
     print(datetime.now(), 'Client disconnected', p)
 
-# TODO: NEEEDS TO BE DELETED BEFORE PUSHING TO PROD
-@app.route('/sessions/<room_id>/<user_id>')
-def get_sessions(room_id, user_id):
-    room = rooms[room_id]
-    users = room.users
-    return list(users[user_id].sid)
-
 @socketio.on('buy')
 def buy(limit, quantity):
     buyer_id, room_id = session_to_user[request.sid]
@@ -169,16 +167,20 @@ def buy(limit, quantity):
 
         best_ask = db.get_best_ask(room_id)
         while best_ask and best_ask['limit_price'] <= limit and quantity > 0:
+            print('quantity', quantity)
             seller_id = best_ask['user_id']
             volume = min(best_ask['quantity'], quantity)
+            print('volume', volume)
             lastdone_updates.append(db.settle_trade(volume, best_ask['limit_price'], room_id, buyer_id, seller_id, True))
             orderbook_updates.append({'side': False, 'limit': best_ask['limit_price'], 'quantity': -volume})
 
             quantity -= volume
             if best_ask['quantity'] == volume:
                 db.delete_order('S', best_ask['id'], seller_id)
+                print('in if')
             else:
                 db.update_ask_quantity(best_ask['id'], -volume)
+                print('in else')
             
             users_to_update.add(seller_id)
 
@@ -194,7 +196,11 @@ def buy(limit, quantity):
             room_to_sessions[room_id])
         
         for user_id in users_to_update:
-            emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+            compiled_user = db.compile_user_data(user_id)
+            emit_set('update_roomuser_data', compiled_user, user_to_sessions[user_id])
+            emit_set('update_player_data', 
+            util.trimDict(compiled_user, ['username', 'cash', 'position']),
+            room_to_sessions[room_id])
         
     for order in orderbook_updates:
         emit_set('update_order_book', order, room_to_sessions[room_id])
@@ -217,16 +223,20 @@ def sell(limit, quantity):
 
         best_bid = db.get_best_bid(room_id)
         while best_bid and best_bid['limit_price'] >= limit and quantity > 0:
+            print(quantity)
             buyer_id = best_bid['user_id']
             volume = min(best_bid['quantity'], quantity)
+            print(volume)
             lastdone_updates.append(db.settle_trade(volume, best_bid['limit_price'], room_id, buyer_id, seller_id, False))
             orderbook_updates.append({'side': True, 'limit': best_bid['limit_price'], 'quantity': -volume})
 
             quantity -= volume
             if best_bid['quantity'] == volume:
-                db.delete_order('B', best_bid['id'], seller_id)
+                db.delete_order('B', best_bid['id'], buyer_id)
+                print('in if')
             else:
-                db.update_ask_quantity(best_bid['id'], -volume)
+                db.update_bid_quantity(best_bid['id'], -volume)
+                print('in else')
             
             users_to_update.add(buyer_id)
 
@@ -242,7 +252,11 @@ def sell(limit, quantity):
             room_to_sessions[room_id])
         
         for user_id in users_to_update:
-            emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+            compiled_user = db.compile_user_data(user_id)
+            emit_set('update_roomuser_data', compiled_user, user_to_sessions[user_id])
+            emit_set('update_player_data', 
+            util.trimDict(compiled_user, ['username', 'cash', 'position']),
+            room_to_sessions[room_id])
         
     for order in orderbook_updates:
         emit_set('update_order_book', order, room_to_sessions[room_id])
@@ -276,8 +290,6 @@ def track_and_emit_bbo(room_id):
                 util.stringifyTime(db.get_latest_bbo_history(room_id), 'bbo_time'), 
                 room_to_sessions[room_id])
 
-
-@app.route('/order-book/<room_id>')
 def get_order_book(room_id):
     bfreq = {}
     afreq = {}
@@ -290,7 +302,6 @@ def get_order_book(room_id):
     d = {'bids': bfreq, 'asks': afreq}
     return d
 
-@app.route('/all-player-stats/<room_id>')
 def get_all_player_stats(room_id):
     room = rooms[room_id]
     users = room.users

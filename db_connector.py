@@ -60,12 +60,12 @@ class DB_Connector:
                 print(e)
         return status
 
-    def get_room_id(self, join_code):
+    def get_room(self, join_code):
         with self.connection.cursor() as cursor:
-            sql = "SELECT id FROM rooms WHERE join_code = %s LIMIT 1;"
+            sql = "SELECT * FROM rooms WHERE join_code = %s LIMIT 1;"
             cursor.execute(sql, (join_code))
             d = cursor.fetchone()
-        return d.get('id') if d else None
+        return d
 
     def add_user(self, room_id, profile_id):
         with self.connection.cursor() as cursor:
@@ -80,14 +80,14 @@ class DB_Connector:
 
     def get_user_from_id(self, user_id):
         with self.connection.cursor() as cursor:
-            sql = "SELECT * FROM users WHERE id = %s LIMIT 1;"
+            sql = "SELECT * FROM userswname WHERE id = %s LIMIT 1;"
             cursor.execute(sql, (user_id))
             d = cursor.fetchone()
         return d
 
     def get_user_from_room_profile(self, room_id, profile_id):
         with self.connection.cursor() as cursor:
-            sql = "SELECT * FROM users WHERE room_id = %s AND profile_id = %s LIMIT 1;"
+            sql = "SELECT * FROM userswname WHERE room_id = %s AND profile_id = %s LIMIT 1;"
             cursor.execute(sql, (room_id, profile_id))
             d = cursor.fetchone()
         return d
@@ -298,12 +298,11 @@ class DB_Connector:
         if isinstance(d, int):
             d = self.get_user_from_id(d)
 
-        username = self.get_username(d['profile_id'])
         orders = self.get_user_orders(d['id'])
         trades = self.get_user_trades(d['id'])
 
         return {
-            'username': username, 
+            'username': d['username'], 
             'user_id': d['id'], 
             'cash': d['cash'], 
             'position': d['position'], 
@@ -311,5 +310,9 @@ class DB_Connector:
             'trades': util.stringifyTimes(trades, 'creation_time')
         }
 
-    def get_room_player_stats(self, room_id):
-        pass
+    def get_room_players(self, room_id):
+        with self.connection.cursor() as cursor:
+            sql = ("SELECT username, cash, position FROM userswname WHERE room_id = %s;")
+            cursor.execute(sql, (room_id))
+            players = cursor.fetchall()
+        return players
