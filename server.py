@@ -48,12 +48,14 @@ def handle_login():
                 return {'status': False}
             rooms = []
         
-    time = datetime.now()
-    nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
-    token = sha256(nonce.encode('utf-8')).hexdigest()
-    token_to_profile[token] = (profile_id, time)
+        time = datetime.now()
+        nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
+        token = sha256(nonce.encode('utf-8')).hexdigest()
+        db.add_token(token, profile_id)
+        #token_to_profile[token] = (profile_id, time)
+        
     print(uuid.getnode(), 'created this token', token)
-    print(uuid.getnode(), 'tokens after adding', token_to_profile)
+    
     return {
         'status': True,
         'profile_id': profile_id,
@@ -66,9 +68,12 @@ def handle_connect(auth):
     print('auth', auth)
     token = auth.get('token')
     profile_id = auth.get('profile_id')
-    print(uuid.getnode(), 'tokens', token_to_profile)
-    if token in token_to_profile:
-        p, time = token_to_profile.get(token)
+    
+    with DB_Connector() as db:
+        d = db.get_token(token)
+    if d:
+        p = d['profile_id']
+        time = d['creation_time']
         if p == profile_id and datetime.now() < time + timedelta(minutes = 30):
             session_to_profile[request.sid] = profile_id
             print(datetime.now(), 'Client connected', request.sid)
@@ -168,20 +173,16 @@ def buy(limit, quantity):
 
         best_ask = db.get_best_ask(room_id)
         while best_ask and best_ask['limit_price'] <= limit and quantity > 0:
-            print('quantity', quantity)
             seller_id = best_ask['user_id']
             volume = min(best_ask['quantity'], quantity)
-            print('volume', volume)
             lastdone_updates.append(db.settle_trade(volume, best_ask['limit_price'], room_id, buyer_id, seller_id, True))
             orderbook_updates.append({'side': False, 'limit': best_ask['limit_price'], 'quantity': -volume})
 
             quantity -= volume
             if best_ask['quantity'] == volume:
                 db.delete_order('S', best_ask['id'], seller_id)
-                print('in if')
             else:
                 db.update_ask_quantity(best_ask['id'], -volume)
-                print('in else')
             
             users_to_update.add(seller_id)
 
@@ -224,20 +225,16 @@ def sell(limit, quantity):
 
         best_bid = db.get_best_bid(room_id)
         while best_bid and best_bid['limit_price'] >= limit and quantity > 0:
-            print(quantity)
             buyer_id = best_bid['user_id']
             volume = min(best_bid['quantity'], quantity)
-            print(volume)
             lastdone_updates.append(db.settle_trade(volume, best_bid['limit_price'], room_id, buyer_id, seller_id, False))
             orderbook_updates.append({'side': True, 'limit': best_bid['limit_price'], 'quantity': -volume})
 
             quantity -= volume
             if best_bid['quantity'] == volume:
                 db.delete_order('B', best_bid['id'], buyer_id)
-                print('in if')
             else:
                 db.update_bid_quantity(best_bid['id'], -volume)
-                print('in else')
             
             users_to_update.add(buyer_id)
 

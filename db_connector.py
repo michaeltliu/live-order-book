@@ -316,3 +316,22 @@ class DB_Connector:
             cursor.execute(sql, (room_id))
             players = cursor.fetchall()
         return players
+
+    def add_token(self, token, profile_id):
+        status = False
+        with self.connection.cursor() as cursor:
+            try:
+                sql = "INSERT INTO tokens (token, profile_id) VALUES (%s, %s);"
+                cursor.execute(sql, (token, profile_id))
+                self.connection.commit()
+                status = True
+            except Exception as e:
+                print(e)
+        return status
+
+    def get_token(self, token):
+        with self.connection.cursor() as cursor:
+            sql = "SELECT * FROM tokens WHERE token = %s LIMIT 1;"
+            cursor.execute(sql, (token))
+            d = cursor.fetchone()
+        return d
