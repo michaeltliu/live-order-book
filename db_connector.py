@@ -251,6 +251,23 @@ class DB_Connector:
                 print(e)
         return status
 
+    def delete_level(self, order_side, level, user_id):
+        with self.connection.cursor() as cursor:
+            try:
+                if order_side == 'B':
+                    typestring = 'bids'
+                elif order_side == 'S':
+                    typestring = 'asks'
+                else:
+                    return False
+
+                sql = f"DELETE FROM {typestring} WHERE limit_price = %s AND user_id = %s;"
+                x = cursor.execute(sql, (level, user_id))
+                self.connection.commit()
+            except Exception as e:
+                print(e)
+        return x
+
     def get_order_by_id(self, order_side, order_id):
         with self.connection.cursor() as cursor:
             if order_side == 'B':
@@ -264,6 +281,17 @@ class DB_Connector:
             cursor.execute(sql, (order_id))
             d = cursor.fetchone()
         return d
+
+    def get_orders_by_level(self, order_side, level, user_id):
+        with self.connection.cursor() as cursor:
+            if order_side == 'B':
+                typestring = 'bids'
+            elif order_side == 'S':
+                typestring = 'asks'
+            else:
+                return False
+
+            sql = f"SELECT * FROM {typestring} WHERE limit_price"
 
     def get_room_bids(self, room_id):
         with self.connection.cursor() as cursor:

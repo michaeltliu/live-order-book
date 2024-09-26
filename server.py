@@ -19,7 +19,6 @@ session_to_user = {}
 user_to_sessions = {}
 room_to_sessions = {}
 session_to_profile = {}
-token_to_profile = {}
 
 def emit_set(event, data, sid_set):
     for sid in sid_set:
@@ -51,9 +50,8 @@ def handle_login():
         time = datetime.now()
         nonce = "%s %s %s" % (os.environ.get('APP_KEY'), profile_id, time)
         token = sha256(nonce.encode('utf-8')).hexdigest()
-        db.add_token(token, profile_id)
-        #token_to_profile[token] = (profile_id, time)
-        
+        token_to_store = sha256(token.encode('utf-8')).hexdigest()
+        db.add_token(token_to_store, profile_id)
     print(uuid.getnode(), 'created this token', token)
     
     return {
@@ -70,7 +68,8 @@ def handle_connect(auth):
     profile_id = auth.get('profile_id')
     
     with DB_Connector() as db:
-        d = db.get_token(token)
+        token_to_get = sha256(token.encode('utf-8')).hexdigest()
+        d = db.get_token(token_to_get)
     if d:
         p = d['profile_id']
         time = d['creation_time']
@@ -268,13 +267,21 @@ def delete_order(order_side, order_id):
     user_id, room_id = session_to_user[request.sid]
     with DB_Connector() as db:
         order = db.get_order_by_id(order_side, order_id)
-        db.delete_order(order_side, order_id, user_id)
-        emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
-        emit_set('update_order_book', 
-        {'side': order_side == 'B', 'limit': order['limit_price'], 'quantity': -order['quantity']}, 
-        room_to_sessions[room_id])
+        if db.delete_order(order_side, order_id, user_id):
+            emit_set('update_roomuser_data', db.compile_user_data(user_id), user_to_sessions[user_id])
+            emit_set('update_order_book', 
+            {'side': order_side == 'B', 'limit': order['limit_price'], 'quantity': -order['quantity']}, 
+            room_to_sessions[room_id])
 
     track_and_emit_bbo(room_id)
+
+@socketio.on('delete-level')
+def delete_level(side, level):
+    user_id, room_id = session_to_user[request.sid]
+    '''
+    with DB_Connector() as db:
+        pass
+    '''
 
 def track_and_emit_bbo(room_id):
     with DB_Connector() as db:
