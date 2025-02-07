@@ -27,7 +27,7 @@ def emit_set(event, data, sid_set):
 @app.route('/login', methods = ['POST'])
 def handle_login():
     data = request.get_json()
-    username = data.get('username').lower()
+    username = data.get('username').lower().strip()
     password = data.get('password')
     print('handle_login', username)
 
